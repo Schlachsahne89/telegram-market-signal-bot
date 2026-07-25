@@ -51,6 +51,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/analyse NVDA - Aktie analysieren\n"
         "/help - Hilfe anzeigen"
     )
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📈 Verfügbare Befehle:\n\n"
+        "/start - Bot starten\n"
+        "/analyse AAPL - Aktie analysieren\n"
+        "/analyse NVDA - Aktie analysieren\n"
+        "/help - Hilfe anzeigen"
+    )
+
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📊 Telegram Market Signal Bot\n\n"
+        "Aktuell in Entwicklung.\n\n"
+        "Verfügbare Befehle:\n"
+        "/start\n"
+        "/help\n"
+        "/analyse TICKER\n"
+        "/info"
+    )
 
 def main():
     if not TOKEN:
@@ -66,6 +85,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analyse", analyse))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("info", info))
     print("Bot gestartet")
     app.run_polling()
 
