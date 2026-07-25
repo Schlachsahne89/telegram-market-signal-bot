@@ -65,7 +65,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analyse", analyse))
-
+    app.add_handler(CommandHandler("help", help_command))
     print("Bot gestartet")
     app.run_polling()
 
