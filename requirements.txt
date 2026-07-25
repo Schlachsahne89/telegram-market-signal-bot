@@ -1,0 +1,4 @@
+python-telegram-bot==22.8
+sta*lette==0.47.2
+uvicorn==0.35.0
+requ*sts==2.32.4
