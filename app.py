@@ -59,7 +59,7 @@ await update.message.reply_text(
     f"Änderung %: {change_percent}%\n"
     f"Volumen: {volume}\n\n"
     "Signal: NEUTRAL"
-)
+
     )
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
