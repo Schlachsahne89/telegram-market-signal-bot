@@ -40,6 +40,7 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ticker = context.args[0].upper()
 
     stock = get_stock_data(ticker)
+    profile = get_company_profile(ticker)
 
     if not stock:
         await update.message.reply_text(
@@ -51,15 +52,29 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     change = stock.get("change")
     change_percent = stock.get("changePercentage")
     volume = stock.get("volume")
+    company_name = "Unbekannt"
+sector = "Unbekannt"
+country = "Unbekannt"
+market_cap = "Unbekannt"
 
-    await update.message.reply_text(
-        f"📈 Analyse für {ticker}\n\n"
-        f"Kurs: {price} USD\n"
-        f"Änderung: {change}\n"
-        f"Änderung %: {change_percent}%\n"
-        f"Volumen: {volume}\n\n"
-        "Signal: NEUTRAL"
-    )
+if profile:
+    company_name = profile.get("companyName", "Unbekannt")
+    sector = profile.get("sector", "Unbekannt")
+    country = profile.get("country", "Unbekannt")
+    market_cap = profile.get("marketCap", "Unbekannt")
+
+await update.message.reply_text(
+    f"📈 Analyse für {ticker}\n\n"
+    f"Unternehmen: {company_name}\n"
+    f"Branche: {sector}\n"
+    f"Land: {country}\n"
+    f"Marktkapitalisierung: {market_cap}\n\n"
+    f"Kurs: {price} USD\n"
+    f"Änderung: {change}\n"
+    f"Änderung %: {change_percent}%\n"
+    f"Volumen: {volume}\n\n"
+    "Signal: NEUTRAL"
+)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -97,6 +112,25 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def get_stock_data(symbol):
     url = (
         f"https://financialmodelingprep.com/stable/quote"
+        f"?symbol={symbol}"
+        f"&apikey={FMP_API_KEY}"
+    )
+
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        if not data:
+            return None
+
+        return data[0]
+
+    except Exception:
+        return None
+        
+        def get_company_profile(symbol):
+    url = (
+        f"https://financialmodelingprep.com/stable/profile"
         f"?symbol={symbol}"
         f"&apikey={FMP_API_KEY}"
     )
