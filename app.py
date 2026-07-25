@@ -39,28 +39,28 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ticker = context.args[0].upper()
 
-stock = get_stock_data(ticker)
+    stock = get_stock_data(ticker)
 
-if not stock:
+    if not stock:
+        await update.message.reply_text(
+            "❌ Ticker nicht gefunden."
+        )
+        return
+
+    price = stock.get("price")
+    change = stock.get("change")
+    change_percent = stock.get("changePercentage")
+    volume = stock.get("volume")
+
     await update.message.reply_text(
-        "❌ Ticker nicht gefunden."
+        f"📈 Analyse für {ticker}\n\n"
+        f"Kurs: {price} USD\n"
+        f"Änderung: {change}\n"
+        f"Änderung %: {change_percent}%\n"
+        f"Volumen: {volume}\n\n"
+        "Signal: NEUTRAL"
     )
-    return
 
-price = stock.get("price")
-change = stock.get("change")
-change_percent = stock.get("changePercentage")
-volume = stock.get("volume")
-
-await update.message.reply_text(
-    f"📈 Analyse für {ticker}\n\n"
-    f"Kurs: {price} USD\n"
-    f"Änderung: {change}\n"
-    f"Änderung %: {change_percent}%\n"
-    f"Volumen: {volume}\n\n"
-    "Signal: NEUTRAL"
-
-    )
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📈 Verfügbare Befehle:\n\n"
