@@ -84,14 +84,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/analyse NVDA - Aktie analysieren\n"
         "/help - Hilfe anzeigen"
     )
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📈 Verfügbare Befehle:\n\n"
-        "/start - Bot starten\n"
-        "/analyse AAPL - Aktie analysieren\n"
-        "/analyse NVDA - Aktie analysieren\n"
-        "/help - Hilfe anzeigen"
-    )
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
