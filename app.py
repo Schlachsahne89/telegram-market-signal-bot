@@ -129,7 +129,7 @@ def get_stock_data(symbol):
         return None
         
         def get_company_profile(symbol):
-    url = (
+         url = (
         f"https://financialmodelingprep.com/stable/profile"
         f"?symbol={symbol}"
         f"&apikey={FMP_API_KEY}"
