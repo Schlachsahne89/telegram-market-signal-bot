@@ -7,6 +7,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
+FMP_API_KEY = os.getenv("FMP_API_KEY")
 PORT = int(os.getenv("PORT", 10000))
 
 
