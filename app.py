@@ -97,9 +97,6 @@ def get_stock_data(symbol):
     except Exception:
         return None
 
-
-def main():
-    ...
 def main():
     if not TOKEN:
         raise RuntimeError("TELEGRAM_TOKEN fehlt.")
