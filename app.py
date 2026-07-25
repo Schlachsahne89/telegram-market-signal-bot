@@ -1,5 +1,6 @@
 import os
 import threading
+import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import Update
@@ -71,7 +72,34 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/analyse TICKER\n"
         "/info"
     )
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📊 Telegram Market Signal Bot"
+    )
 
+
+def get_stock_data(symbol):
+    url = (
+        f"https://financialmodelingprep.com/stable/quote"
+        f"?symbol={symbol}"
+        f"&apikey={FMP_API_KEY}"
+    )
+
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        if not data:
+            return None
+
+        return data[0]
+
+    except Exception:
+        return None
+
+
+def main():
+    ...
 def main():
     if not TOKEN:
         raise RuntimeError("TELEGRAM_TOKEN fehlt.")
