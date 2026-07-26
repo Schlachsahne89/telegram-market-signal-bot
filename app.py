@@ -27,6 +27,10 @@ TICKER_FALLBACKS = {
     "GOOGL": ["GOOGL", "GOOG"],
     "META": ["META"],
     "TSLA": ["TSLA"],
+    "XOM": ["XOM"],
+    "CVX": ["CVX"],
+    "JPM": ["JPM"],
+    "BAC": ["BAC"],
 }
 
 
@@ -185,6 +189,32 @@ def get_stock_news(symbol):
         return data[:5]
 
     return []
+
+
+def get_geopolitical_news(query):
+    url = "https://api.gdeltproject.org/api/v2/doc/doc"
+
+    params = {
+        "query": query,
+        "mode": "ArtList",
+        "format": "json",
+        "maxrecords": 10,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        articles = data.get("articles", [])
+
+        if isinstance(articles, list):
+            return articles[:10]
+
+        return []
+
+    except Exception:
+        return []
 
 
 def find_best_symbol(user_input):
@@ -476,12 +506,13 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1,
             "debt_bad": 2,
             "weights": {
-                "valuation": 0.13,
-                "profitability": 0.18,
-                "growth": 0.30,
-                "leverage": 0.12,
-                "momentum": 0.12,
-                "news": 0.15,
+                "valuation": 0.11,
+                "profitability": 0.17,
+                "growth": 0.27,
+                "leverage": 0.10,
+                "momentum": 0.10,
+                "news": 0.13,
+                "geopolitics": 0.12,
             },
         },
         "financial": {
@@ -493,12 +524,13 @@ def get_sector_thresholds(sector_profile):
             "debt_good": None,
             "debt_bad": None,
             "weights": {
-                "valuation": 0.22,
-                "profitability": 0.30,
-                "growth": 0.20,
+                "valuation": 0.20,
+                "profitability": 0.28,
+                "growth": 0.18,
                 "leverage": 0.00,
-                "momentum": 0.13,
-                "news": 0.15,
+                "momentum": 0.12,
+                "news": 0.12,
+                "geopolitics": 0.10,
             },
         },
         "energy": {
@@ -510,12 +542,13 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1.5,
             "debt_bad": 3,
             "weights": {
-                "valuation": 0.22,
-                "profitability": 0.18,
-                "growth": 0.18,
-                "leverage": 0.17,
-                "momentum": 0.10,
-                "news": 0.15,
+                "valuation": 0.20,
+                "profitability": 0.17,
+                "growth": 0.15,
+                "leverage": 0.15,
+                "momentum": 0.08,
+                "news": 0.12,
+                "geopolitics": 0.13,
             },
         },
         "utilities": {
@@ -527,12 +560,13 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 2,
             "debt_bad": 4,
             "weights": {
-                "valuation": 0.18,
-                "profitability": 0.18,
-                "growth": 0.12,
-                "leverage": 0.27,
-                "momentum": 0.10,
-                "news": 0.15,
+                "valuation": 0.17,
+                "profitability": 0.17,
+                "growth": 0.10,
+                "leverage": 0.25,
+                "momentum": 0.08,
+                "news": 0.11,
+                "geopolitics": 0.12,
             },
         },
         "healthcare": {
@@ -544,12 +578,13 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1.2,
             "debt_bad": 2.5,
             "weights": {
-                "valuation": 0.18,
-                "profitability": 0.18,
-                "growth": 0.27,
-                "leverage": 0.12,
-                "momentum": 0.10,
-                "news": 0.15,
+                "valuation": 0.17,
+                "profitability": 0.17,
+                "growth": 0.25,
+                "leverage": 0.10,
+                "momentum": 0.08,
+                "news": 0.13,
+                "geopolitics": 0.10,
             },
         },
         "default": {
@@ -561,12 +596,13 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1,
             "debt_bad": 2,
             "weights": {
-                "valuation": 0.18,
-                "profitability": 0.22,
-                "growth": 0.22,
-                "leverage": 0.13,
-                "momentum": 0.10,
-                "news": 0.15,
+                "valuation": 0.16,
+                "profitability": 0.20,
+                "growth": 0.20,
+                "leverage": 0.12,
+                "momentum": 0.09,
+                "news": 0.12,
+                "geopolitics": 0.11,
             },
         },
     }
@@ -760,6 +796,154 @@ def analyze_news_sentiment(news_items):
     }
 
 
+def build_geopolitical_query(company, used_symbol):
+    sector = str(company.get("sector", "")).lower()
+    industry = str(company.get("industry", "")).lower()
+    country = str(company.get("country", "")).lower()
+    name = str(company.get("company_name", used_symbol))
+
+    if "technology" in sector or "semiconductor" in industry or "software" in industry:
+        risk_terms = [
+            "export controls",
+            "chip restrictions",
+            "Taiwan",
+            "China sanctions",
+            "supply chain",
+            "trade war",
+        ]
+
+    elif "energy" in sector or "oil" in industry or "gas" in industry:
+        risk_terms = [
+            "oil sanctions",
+            "Middle East conflict",
+            "OPEC",
+            "Russia sanctions",
+            "energy security",
+            "supply disruption",
+        ]
+
+    elif "financial" in sector or "bank" in industry:
+        risk_terms = [
+            "interest rates",
+            "banking crisis",
+            "sanctions",
+            "financial stability",
+            "sovereign risk",
+        ]
+
+    elif "industrials" in sector or "industrial" in industry:
+        risk_terms = [
+            "supply chain",
+            "trade war",
+            "tariffs",
+            "China",
+            "Russia sanctions",
+        ]
+
+    elif "health" in sector or "pharma" in industry or "biotech" in industry:
+        risk_terms = [
+            "drug regulation",
+            "health policy",
+            "patent dispute",
+            "supply chain",
+            "China",
+        ]
+
+    else:
+        risk_terms = [
+            "geopolitical risk",
+            "sanctions",
+            "trade war",
+            "supply chain",
+            "conflict",
+        ]
+
+    query = f'"{name}" OR {used_symbol} ' + " OR ".join(risk_terms)
+
+    if country and country not in ["unbekannt", "unknown"]:
+        query = query + f" OR {country}"
+
+    return query
+
+
+def analyze_geopolitical_risk(articles):
+    high_risk_keywords = [
+        "war",
+        "invasion",
+        "sanctions",
+        "export controls",
+        "military",
+        "blockade",
+        "conflict",
+        "tariffs",
+        "trade war",
+        "supply disruption",
+        "escalation",
+    ]
+
+    medium_risk_keywords = [
+        "tensions",
+        "restrictions",
+        "regulation",
+        "probe",
+        "investigation",
+        "political risk",
+        "supply chain",
+        "uncertainty",
+    ]
+
+    score = 50
+    risk_hits = []
+    headlines = []
+
+    for article in articles:
+        title = first_available(
+            article.get("title"),
+            article.get("seendate"),
+        )
+
+        domain = first_available(
+            article.get("domain"),
+            article.get("sourceCountry"),
+        )
+
+        combined_text = f"{title} {domain}".lower()
+
+        for keyword in high_risk_keywords:
+            if keyword in combined_text:
+                score -= 10
+                risk_hits.append(keyword)
+
+        for keyword in medium_risk_keywords:
+            if keyword in combined_text:
+                score -= 5
+                risk_hits.append(keyword)
+
+        if title != "Unbekannt":
+            headlines.append(title)
+
+    score = max(0, min(100, score))
+
+    if score >= 70:
+        risk_level = "niedrig"
+    elif score >= 40:
+        risk_level = "mittel"
+    else:
+        risk_level = "hoch"
+
+    unique_risks = []
+    for item in risk_hits:
+        if item not in unique_risks:
+            unique_risks.append(item)
+
+    return {
+        "score": score,
+        "risk_level": risk_level,
+        "risk_terms": unique_risks[:5],
+        "headlines": headlines[:3],
+    }
+
+
 def score_news_sentiment(news_score):
     value = to_float(news_score)
 
@@ -775,6 +959,21 @@ def score_news_sentiment(news_score):
     return 55, "News: Sentiment neutral bis gemischt"
 
 
+def score_geopolitics(geopolitical_score):
+    value = to_float(geopolitical_score)
+
+    if value is None:
+        return None, "Geopolitik: keine auswertbaren Daten verfügbar"
+
+    if value >= 70:
+        return 80, "Geopolitik: Risiko wirkt aktuell niedrig"
+
+    if value >= 40:
+        return 55, "Geopolitik: Risiko wirkt moderat"
+
+    return 25, "Geopolitik: Risiko wirkt erhöht"
+
+
 def calculate_professional_research_score(
     company,
     change_percent,
@@ -784,6 +983,7 @@ def calculate_professional_research_score(
     net_income_growth,
     debt_to_equity,
     news_score,
+    geopolitical_score,
 ):
     sector_profile = detect_sector_profile(company["sector"], company["industry"])
     thresholds = get_sector_thresholds(sector_profile)
@@ -796,6 +996,7 @@ def calculate_professional_research_score(
         "leverage": score_leverage(debt_to_equity, thresholds, sector_profile),
         "momentum": score_momentum(change_percent),
         "news": score_news_sentiment(news_score),
+        "geopolitics": score_geopolitics(geopolitical_score),
     }
 
     weighted_sum = 0
@@ -831,9 +1032,9 @@ def calculate_professional_research_score(
         if value != "Unbekannt" and value != "Nicht gewichtet"
     )
 
-    if available_factors >= 5:
+    if available_factors >= 6:
         data_quality = "hoch"
-    elif available_factors >= 3:
+    elif available_factors >= 4:
         data_quality = "mittel"
     else:
         data_quality = "niedrig"
@@ -876,6 +1077,10 @@ def build_analysis(requested_ticker):
     company = extract_company_data(profile, metrics)
     growth_data = extract_growth_data(growth)
 
+    geopolitical_query = build_geopolitical_query(company, used_symbol)
+    geopolitical_articles = get_geopolitical_news(geopolitical_query)
+    geopolitical_risk = analyze_geopolitical_risk(geopolitical_articles)
+
     price = stock.get("price", "Unbekannt")
     change = stock.get("change", "Unbekannt")
     change_percent = first_available(
@@ -902,6 +1107,7 @@ def build_analysis(requested_ticker):
         net_income_growth=net_income_growth,
         debt_to_equity=debt_to_equity,
         news_score=news_sentiment["score"],
+        geopolitical_score=geopolitical_risk["score"],
     )
 
     return {
@@ -921,6 +1127,7 @@ def build_analysis(requested_ticker):
         "free_cash_flow_growth": free_cash_flow_growth,
         "eps_growth": eps_growth,
         "news_sentiment": news_sentiment,
+        "geopolitical_risk": geopolitical_risk,
         "research": research,
     }
 
@@ -947,6 +1154,7 @@ def render_compact_analysis(data):
     company = data["company"]
     research = data["research"]
     news = data["news_sentiment"]
+    geo = data["geopolitical_risk"]
 
     used_symbol_note = ""
     if data["used_symbol"] != data["requested_ticker"]:
@@ -963,8 +1171,9 @@ def render_compact_analysis(data):
         f"Branche: {company['sector']}\n\n"
         f"Signal: {research['signal']}\n"
         f"Score: {research['score']} / 100\n"
-        f"Datenqualität: {research['data_quality']}\n"
-        f"News: {news['sentiment']} ({news['score']})\n\n"
+        f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
+        f"News: {news['sentiment']} ({news['score']})\n"
+        f"Geopolitik: {geo['risk_level']} ({geo['score']} / 100)\n\n"
         f"Kurs: {format_number(data['price'])} USD\n"
         f"Änderung: {format_percent(data['change_percent'])}\n\n"
         f"Top-Gründe:\n"
@@ -979,13 +1188,14 @@ def render_detailed_analysis(data):
     company = data["company"]
     research = data["research"]
     news = data["news_sentiment"]
+    geo = data["geopolitical_risk"]
 
     used_symbol_note = ""
     if data["used_symbol"] != data["requested_ticker"]:
         used_symbol_note = f"Verwendetes FMP-Symbol: {data['used_symbol']}\n\n"
 
     notes_text = ""
-    for note in research["notes"][:7]:
+    for note in research["notes"][:8]:
         notes_text += f"- {note}\n"
 
     headline_text = ""
@@ -995,6 +1205,15 @@ def render_detailed_analysis(data):
     else:
         headline_text = "- Keine aktuellen Headlines verfügbar\n"
 
+    geo_headline_text = ""
+    if geo["headlines"]:
+        for headline in geo["headlines"]:
+            geo_headline_text += f"- {headline}\n"
+    else:
+        geo_headline_text = "- Keine geopolitischen Headlines verfügbar\n"
+
+    risk_terms_text = ", ".join(geo["risk_terms"]) if geo["risk_terms"] else "Keine auffälligen Begriffe"
+
     factor_text = (
         f"Bewertung: {research['factor_scores']['valuation']}\n"
         f"Profitabilität: {research['factor_scores']['profitability']}\n"
@@ -1002,6 +1221,7 @@ def render_detailed_analysis(data):
         f"Verschuldung: {research['factor_scores']['leverage']}\n"
         f"Momentum: {research['factor_scores']['momentum']}\n"
         f"News: {research['factor_scores']['news']}\n"
+        f"Geopolitik: {research['factor_scores']['geopolitics']}\n"
     )
 
     return (
@@ -1030,6 +1250,12 @@ def render_detailed_analysis(data):
         f"Sentiment: {news['sentiment']}\n"
         f"Aktuelle Headlines:\n"
         f"{headline_text}\n"
+        f"🌍 Geopolitik-Risiko\n"
+        f"Risiko: {geo['risk_level']}\n"
+        f"Score: {geo['score']} / 100\n"
+        f"Risikobegriffe: {risk_terms_text}\n"
+        f"Geopolitische Headlines:\n"
+        f"{geo_headline_text}\n"
         f"🧠 Professioneller Research-Score\n"
         f"Sektorprofil: {research['sector_profile']}\n"
         f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
@@ -1095,10 +1321,11 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ kompakte Analyse mit /analyse liefern\n"
         "✅ ausführliche Detailanalyse mit /details liefern\n"
         "✅ Kursdaten, Fundamentaldaten und News-Sentiment auswerten\n"
+        "✅ Geopolitik-Risiko über GDELT einbeziehen\n"
         "✅ branchenspezifischen Research-Score berechnen\n"
         "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
         "Nächster Ausbau:\n"
-        "Geopolitik, ETF-Daten und KI-Zusammenfassung.\n\n"
+        "ETF-Daten und KI-Zusammenfassung.\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
