@@ -161,6 +161,17 @@ def get_ratios(symbol):
     )
 
 
+def get_financial_growth(symbol):
+    return fmp_get(
+        "financial-growth",
+        {
+            "symbol": symbol,
+            "period": "annual",
+            "limit": 1,
+        },
+    )
+
+
 def find_best_symbol(user_input):
     requested = user_input.upper().strip()
 
@@ -184,6 +195,17 @@ def first_available(*values):
         if value is not None and value != "" and value != 0 and value != "Unbekannt":
             return value
     return "Unbekannt"
+
+
+def to_float(value):
+    if value is None or value == "" or value == "Unbekannt":
+        return None
+
+    try:
+        value_as_text = str(value).replace("%", "").replace(",", ".")
+        return float(value_as_text)
+    except Exception:
+        return None
 
 
 def format_market_cap(value):
@@ -222,8 +244,14 @@ def format_percent(value):
         return "Unbekannt"
 
     try:
-        value_as_text = str(value).replace("%", "")
-        number = float(value_as_text)
+        number = to_float(value)
+
+        if number is None:
+            return "Unbekannt"
+
+        if abs(number) <= 1:
+            number = number * 100
+
         return f"{number:.2f}%".replace(".", ",")
     except Exception:
         return str(value)
@@ -276,6 +304,96 @@ def calculate_pe_ratio(stock, metrics, ratios):
     return "Unbekannt"
 
 
+def calculate_roe(metrics, ratios):
+    possible_values = []
+
+    if ratios:
+        possible_values.extend(
+            [
+                ratios.get("returnOnEquity"),
+                ratios.get("roe"),
+                ratios.get("returnOnEquityRatio"),
+            ]
+        )
+
+    if metrics:
+        possible_values.extend(
+            [
+                metrics.get("returnOnEquity"),
+                metrics.get("roe"),
+            ]
+        )
+
+    for value in possible_values:
+        if value is not None and value != "" and value != 0:
+            return value
+
+    return "Unbekannt"
+
+
+def calculate_debt_to_equity(ratios, metrics):
+    possible_values = []
+
+    if ratios:
+        possible_values.extend(
+            [
+                ratios.get("debtEquityRatio"),
+                ratios.get("debtToEquity"),
+                ratios.get("debtToEquityRatio"),
+            ]
+        )
+
+    if metrics:
+        possible_values.extend(
+            [
+                metrics.get("debtToEquity"),
+                metrics.get("debtEquityRatio"),
+            ]
+        )
+
+    for value in possible_values:
+        if value is not None and value != "" and value != 0:
+            return value
+
+    return "Unbekannt"
+
+
+def extract_growth_data(growth):
+    revenue_growth = "Unbekannt"
+    net_income_growth = "Unbekannt"
+    free_cash_flow_growth = "Unbekannt"
+    eps_growth = "Unbekannt"
+
+    if growth:
+        revenue_growth = first_available(
+            growth.get("revenueGrowth"),
+            growth.get("growthRevenue"),
+        )
+
+        net_income_growth = first_available(
+            growth.get("netIncomeGrowth"),
+            growth.get("growthNetIncome"),
+        )
+
+        free_cash_flow_growth = first_available(
+            growth.get("freeCashFlowGrowth"),
+            growth.get("growthFreeCashFlow"),
+        )
+
+        eps_growth = first_available(
+            growth.get("epsgrowth"),
+            growth.get("epsGrowth"),
+            growth.get("growthEPS"),
+        )
+
+    return {
+        "revenue_growth": revenue_growth,
+        "net_income_growth": net_income_growth,
+        "free_cash_flow_growth": free_cash_flow_growth,
+        "eps_growth": eps_growth,
+    }
+
+
 def extract_company_data(profile, metrics):
     company_name = "Unbekannt"
     sector = "Unbekannt"
@@ -306,19 +424,103 @@ def extract_company_data(profile, metrics):
     }
 
 
-def basic_research_note(change_percent):
-    try:
-        value = float(str(change_percent).replace("%", ""))
+def basic_momentum_note(change_percent):
+    value = to_float(change_percent)
 
-        if value >= 2:
-            return "Kurzfristiges Momentum: positiv"
-        if value <= -2:
-            return "Kurzfristiges Momentum: negativ"
-
-        return "Kurzfristiges Momentum: neutral"
-
-    except Exception:
+    if value is None:
         return "Kurzfristiges Momentum: nicht bewertbar"
+
+    if value >= 2:
+        return "Kurzfristiges Momentum: positiv"
+    if value <= -2:
+        return "Kurzfristiges Momentum: negativ"
+
+    return "Kurzfristiges Momentum: neutral"
+
+
+def calculate_research_score(change_percent, pe_ratio, roe, revenue_growth, net_income_growth, debt_to_equity):
+    score = 0
+    notes = []
+
+    change_value = to_float(change_percent)
+    pe_value = to_float(str(pe_ratio).replace(".", "").replace(",", "."))
+    roe_value = to_float(roe)
+    revenue_growth_value = to_float(revenue_growth)
+    net_income_growth_value = to_float(net_income_growth)
+    debt_to_equity_value = to_float(debt_to_equity)
+
+    if change_value is not None:
+        if change_value >= 2:
+            score += 1
+            notes.append("Momentum positiv")
+        elif change_value <= -2:
+            score -= 1
+            notes.append("Momentum negativ")
+
+    if pe_value is not None:
+        if 0 < pe_value <= 25:
+            score += 1
+            notes.append("KGV wirkt moderat")
+        elif pe_value > 50:
+            score -= 1
+            notes.append("KGV wirkt hoch")
+
+    if roe_value is not None:
+        if abs(roe_value) <= 1:
+            roe_value = roe_value * 100
+
+        if roe_value >= 15:
+            score += 1
+            notes.append("ROE stark")
+        elif roe_value < 5:
+            score -= 1
+            notes.append("ROE schwach")
+
+    if revenue_growth_value is not None:
+        if abs(revenue_growth_value) <= 1:
+            revenue_growth_value = revenue_growth_value * 100
+
+        if revenue_growth_value > 5:
+            score += 1
+            notes.append("Umsatzwachstum positiv")
+        elif revenue_growth_value < 0:
+            score -= 1
+            notes.append("Umsatzwachstum negativ")
+
+    if net_income_growth_value is not None:
+        if abs(net_income_growth_value) <= 1:
+            net_income_growth_value = net_income_growth_value * 100
+
+        if net_income_growth_value > 5:
+            score += 1
+            notes.append("Gewinnwachstum positiv")
+        elif net_income_growth_value < 0:
+            score -= 1
+            notes.append("Gewinnwachstum negativ")
+
+    if debt_to_equity_value is not None:
+        if debt_to_equity_value <= 1:
+            score += 1
+            notes.append("Verschuldung wirkt kontrolliert")
+        elif debt_to_equity_value > 2:
+            score -= 1
+            notes.append("Verschuldung erhöht")
+
+    if score >= 3:
+        signal = "LONG-KANDIDAT"
+    elif score <= -2:
+        signal = "SHORT-/RISIKO-KANDIDAT"
+    else:
+        signal = "NEUTRAL"
+
+    if not notes:
+        notes.append("Zu wenige Fundamentaldaten für Score verfügbar")
+
+    return {
+        "score": score,
+        "signal": signal,
+        "notes": notes,
+    }
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -355,10 +557,14 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Unternehmensdaten anzeigen\n"
         "✅ Branche, Industrie, Land und Marktkapitalisierung anzeigen\n"
         "✅ KGV mit mehreren Fallbacks anzeigen\n"
-        "✅ einfache Momentum-Einschätzung anzeigen\n"
+        "✅ ROE anzeigen\n"
+        "✅ Umsatzwachstum anzeigen\n"
+        "✅ Gewinnwachstum anzeigen\n"
+        "✅ Debt/Equity anzeigen\n"
+        "✅ einfachen Research-Score berechnen\n"
         "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
         "Nächster Ausbau:\n"
-        "Fundamentalanalyse, News, Geopolitik und Long/Short-Signale.\n\n"
+        "News, Geopolitik, ETF-Daten und KI-Zusammenfassung.\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
@@ -408,6 +614,27 @@ async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
+def search_symbol_details(query):
+    details = []
+
+    search_name_data = fmp_request("search-name", {"query": query})
+    if isinstance(search_name_data, list):
+        details.extend(search_name_data[:10])
+
+    search_symbol_data = fmp_request("search-symbol", {"query": query})
+    if isinstance(search_symbol_data, list):
+        existing_symbols = {
+            item.get("symbol") for item in details if item.get("symbol")
+        }
+
+        for item in search_symbol_data[:10]:
+            symbol = item.get("symbol")
+            if symbol and symbol not in existing_symbols:
+                details.append(item)
+
+    return details[:10]
+
+
 async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
@@ -440,8 +667,10 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = get_company_profile(used_symbol)
     metrics = get_key_metrics(used_symbol)
     ratios = get_ratios(used_symbol)
+    growth = get_financial_growth(used_symbol)
 
     company = extract_company_data(profile, metrics)
+    growth_data = extract_growth_data(growth)
 
     price = stock.get("price", "Unbekannt")
     change = stock.get("change", "Unbekannt")
@@ -452,11 +681,32 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     volume = stock.get("volume", "Unbekannt")
 
     pe_ratio = calculate_pe_ratio(stock, metrics, ratios)
-    momentum_note = basic_research_note(change_percent)
+    roe = calculate_roe(metrics, ratios)
+    debt_to_equity = calculate_debt_to_equity(ratios, metrics)
+
+    revenue_growth = growth_data["revenue_growth"]
+    net_income_growth = growth_data["net_income_growth"]
+    free_cash_flow_growth = growth_data["free_cash_flow_growth"]
+    eps_growth = growth_data["eps_growth"]
+
+    momentum_note = basic_momentum_note(change_percent)
+
+    research = calculate_research_score(
+        change_percent=change_percent,
+        pe_ratio=pe_ratio,
+        roe=roe,
+        revenue_growth=revenue_growth,
+        net_income_growth=net_income_growth,
+        debt_to_equity=debt_to_equity,
+    )
 
     used_symbol_note = ""
     if used_symbol != requested_ticker:
         used_symbol_note = f"Verwendetes FMP-Symbol: {used_symbol}\n\n"
+
+    notes_text = ""
+    for note in research["notes"][:5]:
+        notes_text += f"- {note}\n"
 
     await update.message.reply_text(
         f"📈 Analyse für {requested_ticker}\n\n"
@@ -465,15 +715,27 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Branche: {company['sector']}\n"
         f"Industrie: {company['industry']}\n"
         f"Land: {company['country']}\n"
-        f"Marktkapitalisierung: {format_market_cap(company['market_cap'])}\n"
-        f"KGV: {pe_ratio}\n\n"
+        f"Marktkapitalisierung: {format_market_cap(company['market_cap'])}\n\n"
+        f"📊 Bewertung & Fundamentaldaten\n"
+        f"KGV: {pe_ratio}\n"
+        f"ROE: {format_percent(roe)}\n"
+        f"Debt/Equity: {format_number(debt_to_equity)}\n"
+        f"Umsatzwachstum: {format_percent(revenue_growth)}\n"
+        f"Gewinnwachstum: {format_percent(net_income_growth)}\n"
+        f"Free-Cashflow-Wachstum: {format_percent(free_cash_flow_growth)}\n"
+        f"EPS-Wachstum: {format_percent(eps_growth)}\n\n"
+        f"💵 Marktdaten\n"
         f"Kurs: {format_number(price)} USD\n"
         f"Änderung: {format_number(change)}\n"
         f"Änderung %: {format_percent(change_percent)}\n"
         f"Volumen: {volume}\n\n"
+        f"🧭 Einschätzung\n"
         f"{momentum_note}\n"
-        "Signal: NEUTRAL\n\n"
-        "Hinweis: Keine Anlageberatung."
+        f"Research-Score: {research['score']}\n"
+        f"Signal: {research['signal']}\n\n"
+        f"Gründe:\n"
+        f"{notes_text}\n"
+        "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
     )
 
 
