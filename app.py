@@ -1,4 +1,6 @@
 import os
+import json
+import time
 import threading
 import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -10,6 +12,10 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
+
+ALERT_INTERVAL_SECONDS = int(os.getenv("ALERT_INTERVAL_SECONDS", "900"))
+WATCHLIST_FILE = "watchlists.json"
+SEEN_ALERTS_FILE = "seen_alerts.json"
 
 
 TICKER_FALLBACKS = {
@@ -48,6 +54,42 @@ class HealthHandler(BaseHTTPRequestHandler):
 def start_webserver():
     server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
     server.serve_forever()
+
+
+def load_json_file(path, default):
+    try:
+        if not os.path.exists(path):
+            return default
+
+        with open(path, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    except Exception:
+        return default
+
+
+def save_json_file(path, data):
+    try:
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def load_watchlists():
+    return load_json_file(WATCHLIST_FILE, {})
+
+
+def save_watchlists(data):
+    save_json_file(WATCHLIST_FILE, data)
+
+
+def load_seen_alerts():
+    return load_json_file(SEEN_ALERTS_FILE, {})
+
+
+def save_seen_alerts(data):
+    save_json_file(SEEN_ALERTS_FILE, data)
 
 
 def fmp_request(endpoint, params):
@@ -98,8 +140,8 @@ def to_float(value):
         return None
 
     try:
-        value_as_text = str(value).replace("%", "").replace(",", ".")
-        return float(value_as_text)
+        text = str(value).replace("%", "").replace(",", ".")
+        return float(text)
     except Exception:
         return None
 
@@ -171,16 +213,16 @@ def get_possible_symbols(user_input):
 def search_symbols(query):
     results = []
 
-    search_name_data = fmp_request("search-name", {"query": query})
-    if isinstance(search_name_data, list):
-        for item in search_name_data[:10]:
+    data_name = fmp_request("search-name", {"query": query})
+    if isinstance(data_name, list):
+        for item in data_name[:10]:
             symbol = item.get("symbol")
             if symbol and symbol not in results:
                 results.append(symbol)
 
-    search_symbol_data = fmp_request("search-symbol", {"query": query})
-    if isinstance(search_symbol_data, list):
-        for item in search_symbol_data[:10]:
+    data_symbol = fmp_request("search-symbol", {"query": query})
+    if isinstance(data_symbol, list):
+        for item in data_symbol[:10]:
             symbol = item.get("symbol")
             if symbol and symbol not in results:
                 results.append(symbol)
@@ -191,19 +233,17 @@ def search_symbols(query):
 def search_symbol_details(query):
     details = []
 
-    search_name_data = fmp_request("search-name", {"query": query})
-    if isinstance(search_name_data, list):
-        details.extend(search_name_data[:10])
+    data_name = fmp_request("search-name", {"query": query})
+    if isinstance(data_name, list):
+        details.extend(data_name[:10])
 
-    search_symbol_data = fmp_request("search-symbol", {"query": query})
-    if isinstance(search_symbol_data, list):
-        existing_symbols = {
-            item.get("symbol") for item in details if item.get("symbol")
-        }
+    data_symbol = fmp_request("search-symbol", {"query": query})
+    if isinstance(data_symbol, list):
+        existing = {item.get("symbol") for item in details if item.get("symbol")}
 
-        for item in search_symbol_data[:10]:
+        for item in data_symbol[:10]:
             symbol = item.get("symbol")
-            if symbol and symbol not in existing_symbols:
+            if symbol and symbol not in existing:
                 details.append(item)
 
     return details[:10]
@@ -213,8 +253,8 @@ def find_best_symbol(user_input):
     requested = user_input.upper().strip()
     candidates = get_possible_symbols(requested)
 
-    searched_symbols = search_symbols(requested)
-    for symbol in searched_symbols:
+    searched = search_symbols(requested)
+    for symbol in searched:
         if symbol not in candidates:
             candidates.append(symbol)
 
@@ -314,10 +354,10 @@ def get_geopolitical_news(query):
 
 
 def calculate_pe_ratio(stock, metrics, ratios):
-    possible_values = []
+    values = []
 
     if stock:
-        possible_values.extend(
+        values.extend(
             [
                 stock.get("pe"),
                 stock.get("peRatio"),
@@ -326,7 +366,7 @@ def calculate_pe_ratio(stock, metrics, ratios):
         )
 
     if metrics:
-        possible_values.extend(
+        values.extend(
             [
                 metrics.get("peRatio"),
                 metrics.get("priceEarningsRatio"),
@@ -335,7 +375,7 @@ def calculate_pe_ratio(stock, metrics, ratios):
         )
 
     if ratios:
-        possible_values.extend(
+        values.extend(
             [
                 ratios.get("peRatio"),
                 ratios.get("priceEarningsRatio"),
@@ -343,7 +383,7 @@ def calculate_pe_ratio(stock, metrics, ratios):
             ]
         )
 
-    for value in possible_values:
+    for value in values:
         if value is not None and value != "" and value != 0:
             return value
 
@@ -360,10 +400,10 @@ def calculate_pe_ratio(stock, metrics, ratios):
 
 
 def calculate_roe(metrics, ratios):
-    possible_values = []
+    values = []
 
     if ratios:
-        possible_values.extend(
+        values.extend(
             [
                 ratios.get("returnOnEquity"),
                 ratios.get("roe"),
@@ -372,14 +412,14 @@ def calculate_roe(metrics, ratios):
         )
 
     if metrics:
-        possible_values.extend(
+        values.extend(
             [
                 metrics.get("returnOnEquity"),
                 metrics.get("roe"),
             ]
         )
 
-    for value in possible_values:
+    for value in values:
         if value is not None and value != "" and value != 0:
             return value
 
@@ -387,10 +427,10 @@ def calculate_roe(metrics, ratios):
 
 
 def calculate_debt_to_equity(ratios, metrics):
-    possible_values = []
+    values = []
 
     if ratios:
-        possible_values.extend(
+        values.extend(
             [
                 ratios.get("debtEquityRatio"),
                 ratios.get("debtToEquity"),
@@ -399,14 +439,14 @@ def calculate_debt_to_equity(ratios, metrics):
         )
 
     if metrics:
-        possible_values.extend(
+        values.extend(
             [
                 metrics.get("debtToEquity"),
                 metrics.get("debtEquityRatio"),
             ]
         )
 
-    for value in possible_values:
+    for value in values:
         if value is not None and value != "" and value != 0:
             return value
 
@@ -548,42 +588,6 @@ def get_sector_thresholds(sector_profile):
                 "geopolitics": 0.13,
             },
         },
-        "utilities": {
-            "pe_good": 25,
-            "pe_bad": 45,
-            "roe_good": 10,
-            "roe_bad": 4,
-            "growth_good": 3,
-            "debt_good": 2,
-            "debt_bad": 4,
-            "weights": {
-                "valuation": 0.17,
-                "profitability": 0.17,
-                "growth": 0.10,
-                "leverage": 0.25,
-                "momentum": 0.08,
-                "news": 0.11,
-                "geopolitics": 0.12,
-            },
-        },
-        "healthcare": {
-            "pe_good": 30,
-            "pe_bad": 60,
-            "roe_good": 12,
-            "roe_bad": 4,
-            "growth_good": 7,
-            "debt_good": 1.2,
-            "debt_bad": 2.5,
-            "weights": {
-                "valuation": 0.17,
-                "profitability": 0.17,
-                "growth": 0.25,
-                "leverage": 0.10,
-                "momentum": 0.08,
-                "news": 0.13,
-                "geopolitics": 0.10,
-            },
-        },
         "default": {
             "pe_good": 25,
             "pe_bad": 50,
@@ -608,30 +612,30 @@ def get_sector_thresholds(sector_profile):
 
 
 def score_valuation(pe_ratio, thresholds):
-    pe_value = to_float(pe_ratio)
+    value = to_float(pe_ratio)
 
-    if pe_value is None or pe_value <= 0:
+    if value is None or value <= 0:
         return None, "Bewertung: keine belastbare KGV-Bewertung möglich"
 
-    if pe_value <= thresholds["pe_good"]:
+    if value <= thresholds["pe_good"]:
         return 85, "Bewertung: KGV wirkt im Branchenkontext attraktiv/moderat"
 
-    if pe_value <= thresholds["pe_bad"]:
+    if value <= thresholds["pe_bad"]:
         return 55, "Bewertung: KGV wirkt im Branchenkontext neutral bis ambitioniert"
 
     return 25, "Bewertung: KGV wirkt im Branchenkontext hoch"
 
 
 def score_profitability(roe, thresholds):
-    roe_value = normalize_percent_value(roe)
+    value = normalize_percent_value(roe)
 
-    if roe_value is None:
+    if value is None:
         return None, "Profitabilität: ROE nicht verfügbar"
 
-    if roe_value >= thresholds["roe_good"]:
+    if value >= thresholds["roe_good"]:
         return 85, "Profitabilität: ROE stark"
 
-    if roe_value >= thresholds["roe_bad"]:
+    if value >= thresholds["roe_bad"]:
         return 55, "Profitabilität: ROE solide"
 
     return 25, "Profitabilität: ROE schwach"
@@ -640,10 +644,9 @@ def score_profitability(roe, thresholds):
 def score_growth(revenue_growth, net_income_growth, thresholds):
     values = []
 
-    revenue_value = normalize_percent_value(revenue_growth)
-    income_value = normalize_percent_value(net_income_growth)
+    for raw_value in [revenue_growth, net_income_growth]:
+        value = normalize_percent_value(raw_value)
 
-    for value in [revenue_value, income_value]:
         if value is None:
             continue
 
@@ -657,33 +660,30 @@ def score_growth(revenue_growth, net_income_growth, thresholds):
     if not values:
         return None, "Wachstum: Umsatz- und Gewinnwachstum nicht verfügbar"
 
-    avg_score = sum(values) / len(values)
+    avg = sum(values) / len(values)
 
-    if avg_score >= 75:
-        return avg_score, "Wachstum: Umsatz/Gewinn entwickeln sich stark"
+    if avg >= 75:
+        return avg, "Wachstum: Umsatz/Gewinn entwickeln sich stark"
 
-    if avg_score >= 50:
-        return avg_score, "Wachstum: Umsatz/Gewinn wirken stabil bis moderat"
+    if avg >= 50:
+        return avg, "Wachstum: Umsatz/Gewinn wirken stabil bis moderat"
 
-    return avg_score, "Wachstum: Umsatz/Gewinn wirken schwach oder rückläufig"
+    return avg, "Wachstum: Umsatz/Gewinn wirken schwach oder rückläufig"
 
 
 def score_leverage(debt_to_equity, thresholds, sector_profile):
     if sector_profile == "financial":
         return None, "Verschuldung: bei Finanzwerten nicht über Standard-Debt/Equity bewertet"
 
-    debt_value = to_float(debt_to_equity)
+    value = to_float(debt_to_equity)
 
-    if debt_value is None:
+    if value is None:
         return None, "Verschuldung: Debt/Equity nicht verfügbar"
 
-    debt_good = thresholds["debt_good"]
-    debt_bad = thresholds["debt_bad"]
-
-    if debt_good is not None and debt_value <= debt_good:
+    if thresholds["debt_good"] is not None and value <= thresholds["debt_good"]:
         return 80, "Verschuldung: wirkt kontrolliert"
 
-    if debt_bad is not None and debt_value <= debt_bad:
+    if thresholds["debt_bad"] is not None and value <= thresholds["debt_bad"]:
         return 55, "Verschuldung: wirkt beobachtenswert, aber nicht extrem"
 
     return 25, "Verschuldung: wirkt erhöht"
@@ -731,28 +731,18 @@ def analyze_news_sentiment(news_items):
     headlines = []
 
     for item in news_items:
-        title = first_available(
-            item.get("title"),
-            item.get("headline"),
-        )
-
-        text = first_available(
-            item.get("text"),
-            item.get("snippet"),
-            item.get("summary"),
-            item.get("site"),
-        )
-
-        combined_text = f"{title} {text}".lower()
+        title = first_available(item.get("title"), item.get("headline"))
+        text = first_available(item.get("text"), item.get("snippet"), item.get("summary"))
+        combined = f"{title} {text}".lower()
 
         item_score = 0
 
-        for word in positive_keywords:
-            if word in combined_text:
+        for keyword in positive_keywords:
+            if keyword in combined:
                 item_score += 1
 
-        for word in negative_keywords:
-            if word in combined_text:
+        for keyword in negative_keywords:
+            if keyword in combined:
                 item_score -= 1
 
         if item_score > 0:
@@ -780,61 +770,54 @@ def analyze_news_sentiment(news_items):
 def build_geopolitical_queries(company, used_symbol):
     sector = str(company.get("sector", "")).lower()
     industry = str(company.get("industry", "")).lower()
-    company_name = str(company.get("company_name", used_symbol))
+    name = str(company.get("company_name", used_symbol))
 
     if "technology" in sector or "semiconductor" in industry or "software" in industry:
         return [
-            f'"{company_name}" "export controls"',
-            f'"{company_name}" "supply chain"',
+            f'"{name}" "export controls"',
+            f'"{name}" "supply chain"',
             f'{used_symbol} "China"',
             f'{used_symbol} "Taiwan"',
             '"semiconductor" "export controls"',
             '"chips" "Taiwan" "China"',
             '"AI chips" "China restrictions"',
             '"Halbleiter" "China" "Taiwan"',
-            '"Exportkontrollen" "Halbleiter"',
         ]
 
     if "energy" in sector or "oil" in industry or "gas" in industry:
         return [
-            f'"{company_name}" "oil sanctions"',
-            f'"{company_name}" "energy security"',
+            f'"{name}" "oil sanctions"',
+            f'"{name}" "energy security"',
             f'{used_symbol} "Middle East"',
             f'{used_symbol} "Russia sanctions"',
             '"oil" "Middle East conflict"',
             '"OPEC" "supply disruption"',
             '"energy security" "sanctions"',
-            '"Energieversorgung" "Sanktionen"',
-            '"Öl" "Nahost"',
         ]
 
     if "financial" in sector or "bank" in industry:
         return [
-            f'"{company_name}" "banking risk"',
-            f'"{company_name}" "sanctions"',
+            f'"{name}" "banking risk"',
+            f'"{name}" "sanctions"',
             f'{used_symbol} "financial stability"',
             '"banking crisis" "interest rates"',
             '"sanctions" "financial markets"',
-            '"Bankenkrise" "Zinsen"',
         ]
 
     return [
-        f'"{company_name}" "geopolitical risk"',
-        f'"{company_name}" "sanctions"',
+        f'"{name}" "geopolitical risk"',
+        f'"{name}" "sanctions"',
         f'{used_symbol} "supply chain"',
         '"geopolitical risk" "stocks"',
         '"sanctions" "global markets"',
-        '"Sanktionen" "Aktienmärkte"',
     ]
 
 
 def get_geopolitical_articles_with_fallback(company, used_symbol):
-    queries = build_geopolitical_queries(company, used_symbol)
-
     all_articles = []
     seen_titles = set()
 
-    for query in queries:
+    for query in build_geopolitical_queries(company, used_symbol):
         articles = get_geopolitical_news(query)
 
         for article in articles:
@@ -851,16 +834,16 @@ def get_geopolitical_articles_with_fallback(company, used_symbol):
 
 
 def analyze_geopolitical_risk(articles):
-    high_risk_keywords = [
+    high_keywords = [
         "war", "invasion", "sanctions", "export controls",
         "military", "blockade", "conflict", "tariffs",
         "trade war", "supply disruption", "escalation",
         "krieg", "sanktionen", "exportkontrollen",
-        "militär", "konflikt", "zölle",
-        "handelskrieg", "lieferkettenstörung", "eskalation",
+        "militär", "konflikt", "zölle", "handelskrieg",
+        "lieferkettenstörung", "eskalation",
     ]
 
-    medium_risk_keywords = [
+    medium_keywords = [
         "tensions", "restrictions", "regulation", "probe",
         "investigation", "political risk", "supply chain",
         "uncertainty", "spannungen", "beschränkungen",
@@ -873,25 +856,17 @@ def analyze_geopolitical_risk(articles):
     headlines = []
 
     for article in articles:
-        title = first_available(
-            article.get("title"),
-            article.get("seendate"),
-        )
+        title = first_available(article.get("title"), article.get("seendate"))
+        domain = first_available(article.get("domain"), article.get("sourceCountry"))
+        combined = f"{title} {domain}".lower()
 
-        domain = first_available(
-            article.get("domain"),
-            article.get("sourceCountry"),
-        )
-
-        combined_text = f"{title} {domain}".lower()
-
-        for keyword in high_risk_keywords:
-            if keyword in combined_text:
+        for keyword in high_keywords:
+            if keyword in combined:
                 score -= 10
                 risk_hits.append(keyword)
 
-        for keyword in medium_risk_keywords:
-            if keyword in combined_text:
+        for keyword in medium_keywords:
+            if keyword in combined:
                 score -= 5
                 risk_hits.append(keyword)
 
@@ -901,11 +876,11 @@ def analyze_geopolitical_risk(articles):
     score = max(0, min(100, score))
 
     if score >= 70:
-        risk_level = "niedrig"
+        level = "niedrig"
     elif score >= 40:
-        risk_level = "mittel"
+        level = "mittel"
     else:
-        risk_level = "hoch"
+        level = "hoch"
 
     unique_risks = []
     for item in risk_hits:
@@ -914,7 +889,7 @@ def analyze_geopolitical_risk(articles):
 
     return {
         "score": score,
-        "risk_level": risk_level,
+        "risk_level": level,
         "risk_terms": unique_risks[:5],
         "headlines": headlines[:3],
     }
@@ -1053,8 +1028,8 @@ def build_analysis(requested_ticker):
     company = extract_company_data(profile, metrics)
     growth_data = extract_growth_data(growth)
 
-    geopolitical_articles = get_geopolitical_articles_with_fallback(company, used_symbol)
-    geopolitical_risk = analyze_geopolitical_risk(geopolitical_articles)
+    geo_articles = get_geopolitical_articles_with_fallback(company, used_symbol)
+    geo_risk = analyze_geopolitical_risk(geo_articles)
 
     price = stock.get("price", "Unbekannt")
     change = stock.get("change", "Unbekannt")
@@ -1082,7 +1057,7 @@ def build_analysis(requested_ticker):
         net_income_growth=net_income_growth,
         debt_to_equity=debt_to_equity,
         news_score=news_sentiment["score"],
-        geopolitical_score=geopolitical_risk["score"],
+        geopolitical_score=geo_risk["score"],
     )
 
     return {
@@ -1102,7 +1077,7 @@ def build_analysis(requested_ticker):
         "free_cash_flow_growth": free_cash_flow_growth,
         "eps_growth": eps_growth,
         "news_sentiment": news_sentiment,
-        "geopolitical_risk": geopolitical_risk,
+        "geopolitical_risk": geo_risk,
         "research": research,
     }
 
