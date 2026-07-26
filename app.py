@@ -14,8 +14,10 @@ FMP_API_KEY = os.getenv("FMP_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 
 ALERT_INTERVAL_SECONDS = int(os.getenv("ALERT_INTERVAL_SECONDS", "900"))
+
 WATCHLIST_FILE = "watchlists.json"
 SEEN_ALERTS_FILE = "seen_alerts.json"
+SYMBOL_CACHE_FILE = "symbol_cache.json"
 
 
 TICKER_FALLBACKS = {
@@ -38,6 +40,11 @@ TICKER_FALLBACKS = {
     "JPM": ["JPM"],
     "BAC": ["BAC"],
     "TSM": ["TSM"],
+    "SHELL": ["SHEL", "SHEL.L"],
+    "SHEL": ["SHEL", "SHEL.L"],
+    "TOTAL": ["TTE", "TTE.PA", "TOTB.DE"],
+    "TOTALENERGIES": ["TTE", "TTE.PA", "TOTB.DE"],
+    "TTE": ["TTE", "TTE.PA"],
 }
 
 
@@ -60,10 +67,8 @@ def load_json_file(path, default):
     try:
         if not os.path.exists(path):
             return default
-
         with open(path, "r", encoding="utf-8") as file:
             return json.load(file)
-
     except Exception:
         return default
 
@@ -72,7 +77,6 @@ def save_json_file(path, data):
     try:
         with open(path, "w", encoding="utf-8") as file:
             json.dump(data, file, ensure_ascii=False, indent=2)
-
     except Exception:
         pass
 
@@ -93,20 +97,89 @@ def save_seen_alerts(data):
     save_json_file(SEEN_ALERTS_FILE, data)
 
 
+def load_symbol_cache():
+    return load_json_file(
+        SYMBOL_CACHE_FILE,
+        {
+            "synced_at": None,
+            "items": [],
+        },
+    )
+
+
+def save_symbol_cache(data):
+    save_json_file(SYMBOL_CACHE_FILE, data)
+
+
+def first_available(*values):
+    for value in values:
+        if value is not None and value != "" and value != 0 and value != "Unbekannt":
+            return value
+    return "Unbekannt"
+
+
+def to_float(value):
+    if value is None or value == "" or value == "Unbekannt":
+        return None
+    try:
+        return float(str(value).replace("%", "").replace(",", "."))
+    except Exception:
+        return None
+
+
+def normalize_percent_value(value):
+    number = to_float(value)
+    if number is None:
+        return None
+    if abs(number) <= 1:
+        return number * 100
+    return number
+
+
+def format_number(value):
+    if value is None or value == "Unbekannt":
+        return "Unbekannt"
+    try:
+        return f"{float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return str(value)
+
+
+def format_percent(value):
+    number = normalize_percent_value(value)
+    if number is None:
+        return "Unbekannt"
+    return f"{number:.2f}%".replace(".", ",")
+
+
+def format_market_cap(value):
+    if value is None or value == "Unbekannt":
+        return "Unbekannt"
+    try:
+        value = float(value)
+        if value >= 1_000_000_000_000:
+            return f"{value / 1_000_000_000_000:.2f} Bio. USD"
+        if value >= 1_000_000_000:
+            return f"{value / 1_000_000_000:.2f} Mrd. USD"
+        if value >= 1_000_000:
+            return f"{value / 1_000_000:.2f} Mio. USD"
+        return f"{value:.0f} USD"
+    except Exception:
+        return str(value)
+
+
 def fmp_request(endpoint, params):
     if not FMP_API_KEY:
         return None
 
     url = f"https://financialmodelingprep.com/stable/{endpoint}"
-
     request_params = dict(params)
     request_params["apikey"] = FMP_API_KEY
 
     try:
-        response = requests.get(url, params=request_params, timeout=15)
+        response = requests.get(url, params=request_params, timeout=25)
         response.raise_for_status()
         return response.json()
-
     except Exception:
         return None
 
@@ -114,107 +187,15 @@ def fmp_request(endpoint, params):
 def first_item(data):
     if not data:
         return None
-
     if isinstance(data, list):
-        if len(data) == 0:
-            return None
-        return data[0]
-
+        return data[0] if data else None
     if isinstance(data, dict):
         return data
-
     return None
 
 
 def fmp_get(endpoint, params):
     return first_item(fmp_request(endpoint, params))
-
-
-def first_available(*values):
-    for value in values:
-        if value is not None and value != "" and value != 0 and value != "Unbekannt":
-            return value
-
-    return "Unbekannt"
-
-
-def to_float(value):
-    if value is None or value == "" or value == "Unbekannt":
-        return None
-
-    try:
-        text = str(value).replace("%", "").replace(",", ".")
-        return float(text)
-
-    except Exception:
-        return None
-
-
-def normalize_percent_value(value):
-    number = to_float(value)
-
-    if number is None:
-        return None
-
-    if abs(number) <= 1:
-        return number * 100
-
-    return number
-
-
-def format_number(value):
-    if value is None or value == "Unbekannt":
-        return "Unbekannt"
-
-    try:
-        number = float(value)
-        return f"{number:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-    except Exception:
-        return str(value)
-
-
-def format_percent(value):
-    if value is None or value == "Unbekannt":
-        return "Unbekannt"
-
-    number = normalize_percent_value(value)
-
-    if number is None:
-        return "Unbekannt"
-
-    return f"{number:.2f}%".replace(".", ",")
-
-
-def format_market_cap(value):
-    if value is None or value == "Unbekannt":
-        return "Unbekannt"
-
-    try:
-        value = float(value)
-
-        if value >= 1_000_000_000_000:
-            return f"{value / 1_000_000_000_000:.2f} Bio. USD"
-
-        if value >= 1_000_000_000:
-            return f"{value / 1_000_000_000:.2f} Mrd. USD"
-
-        if value >= 1_000_000:
-            return f"{value / 1_000_000:.2f} Mio. USD"
-
-        return f"{value:.0f} USD"
-
-    except Exception:
-        return str(value)
-
-
-def get_possible_symbols(user_input):
-    symbol = user_input.upper().strip()
-
-    if symbol in TICKER_FALLBACKS:
-        return TICKER_FALLBACKS[symbol]
-
-    return [symbol]
 
 
 def get_symbol_name(item):
@@ -234,9 +215,7 @@ def get_symbol_exchange(item):
 
 
 def get_symbol_currency(item):
-    return first_available(
-        item.get("currency"),
-    )
+    return first_available(item.get("currency"))
 
 
 def get_symbol_type(item):
@@ -248,7 +227,6 @@ def get_symbol_type(item):
 
 def score_symbol_result(item, query):
     query_text = str(query).lower().strip()
-
     symbol = str(item.get("symbol", "")).lower().strip()
     name = str(get_symbol_name(item)).lower().strip()
     exchange = str(get_symbol_exchange(item)).lower().strip()
@@ -257,48 +235,134 @@ def score_symbol_result(item, query):
 
     if symbol == query_text:
         score += 100
-
     if symbol.startswith(query_text):
         score += 60
-
     if query_text in symbol:
         score += 30
-
     if name == query_text:
         score += 80
-
     if name.startswith(query_text):
         score += 50
-
     if query_text in name:
         score += 25
-
-    if exchange in ["nasdaq", "nyse", "xetra", "lse", "tsx", "tokyo", "hkse"]:
+    if exchange in ["nasdaq", "nyse", "xetra", "lse", "tsx", "tokyo", "hkse", "euronext"]:
         score += 5
 
     return score
 
 
+def sync_symbol_cache():
+    data = fmp_request("stock-list", {})
+
+    if not isinstance(data, list):
+        return 0
+
+    cleaned_items = []
+    seen_symbols = set()
+
+    for item in data:
+        symbol = item.get("symbol")
+
+        if not symbol:
+            continue
+
+        symbol_key = str(symbol).upper().strip()
+
+        if symbol_key in seen_symbols:
+            continue
+
+        seen_symbols.add(symbol_key)
+
+        cleaned_items.append(
+            {
+                "symbol": symbol,
+                "companyName": first_available(item.get("companyName"), item.get("name"), symbol),
+                "name": first_available(item.get("name"), item.get("companyName"), symbol),
+                "exchange": first_available(
+                    item.get("exchange"),
+                    item.get("exchangeShortName"),
+                    item.get("stockExchange"),
+                ),
+                "currency": first_available(item.get("currency")),
+                "type": first_available(item.get("type"), item.get("securityType")),
+            }
+        )
+
+    cache = {
+        "synced_at": int(time.time()),
+        "items": cleaned_items,
+    }
+
+    save_symbol_cache(cache)
+
+    return len(cleaned_items)
+
+
+def get_symbol_cache_count():
+    cache = load_symbol_cache()
+    items = cache.get("items", [])
+
+    if isinstance(items, list):
+        return len(items)
+
+    return 0
+
+
+def get_symbol_cache_synced_at():
+    cache = load_symbol_cache()
+    return cache.get("synced_at")
+
+
+def search_symbol_catalog(query, limit=50):
+    cache = load_symbol_cache()
+    items = cache.get("items", [])
+
+    if not isinstance(items, list):
+        return []
+
+    query_text = str(query).lower().strip()
+
+    if not query_text:
+        return []
+
+    results = []
+
+    for item in items:
+        symbol = str(item.get("symbol", "")).lower().strip()
+        name = str(first_available(item.get("companyName"), item.get("name"))).lower().strip()
+
+        if query_text in symbol or query_text in name:
+            results.append(item)
+
+    results.sort(
+        key=lambda item: score_symbol_result(item, query),
+        reverse=True,
+    )
+
+    return results[:limit]
+
+
+def get_possible_symbols(user_input):
+    symbol = user_input.upper().strip()
+
+    if symbol in TICKER_FALLBACKS:
+        return TICKER_FALLBACKS[symbol]
+
+    return [symbol]
+
+
 def search_symbols(query):
     results = []
 
-    data_name = fmp_request("search-name", {"query": query})
+    for endpoint in ["search-name", "search-symbol"]:
+        data = fmp_request(endpoint, {"query": query})
 
-    if isinstance(data_name, list):
-        for item in data_name[:10]:
-            symbol = item.get("symbol")
+        if isinstance(data, list):
+            for item in data[:20]:
+                symbol = item.get("symbol")
 
-            if symbol and symbol not in results:
-                results.append(symbol)
-
-    data_symbol = fmp_request("search-symbol", {"query": query})
-
-    if isinstance(data_symbol, list):
-        for item in data_symbol[:10]:
-            symbol = item.get("symbol")
-
-            if symbol and symbol not in results:
-                results.append(symbol)
+                if symbol and symbol not in results:
+                    results.append(symbol)
 
     return results
 
@@ -306,25 +370,13 @@ def search_symbols(query):
 def search_symbol_details(query):
     raw_results = []
 
-    search_name_data = fmp_request(
-        "search-name",
-        {
-            "query": query,
-        },
-    )
+    raw_results.extend(search_symbol_catalog(query, limit=50))
 
-    if isinstance(search_name_data, list):
-        raw_results.extend(search_name_data[:20])
+    for endpoint in ["search-name", "search-symbol"]:
+        data = fmp_request(endpoint, {"query": query})
 
-    search_symbol_data = fmp_request(
-        "search-symbol",
-        {
-            "query": query,
-        },
-    )
-
-    if isinstance(search_symbol_data, list):
-        raw_results.extend(search_symbol_data[:20])
+        if isinstance(data, list):
+            raw_results.extend(data[:20])
 
     results = []
     seen_symbols = set()
@@ -348,16 +400,14 @@ def search_symbol_details(query):
         reverse=True,
     )
 
-    return results[:15]
+    return results[:25]
 
 
 def find_best_symbol(user_input):
     requested = user_input.upper().strip()
     candidates = get_possible_symbols(requested)
 
-    searched = search_symbols(requested)
-
-    for symbol in searched:
+    for symbol in search_symbols(requested):
         if symbol not in candidates:
             candidates.append(symbol)
 
@@ -496,7 +546,6 @@ def calculate_pe_ratio(stock, metrics, ratios):
     try:
         if price and eps and float(eps) != 0:
             return float(price) / float(eps)
-
     except Exception:
         pass
 
@@ -600,6 +649,7 @@ def extract_company_data(profile, metrics):
             profile.get("companyNameLong"),
             profile.get("name"),
         )
+
         sector = first_available(profile.get("sector"))
         industry = first_available(profile.get("industry"))
         country = first_available(profile.get("country"))
@@ -724,7 +774,7 @@ def score_valuation(pe_ratio, thresholds):
     value = to_float(pe_ratio)
 
     if value is None or value <= 0:
-        return None, "Bewertung: keine belastbare KGV-Bewertung möglich"
+        return None, "Bewertung: keine belastbare KGV-Bewertung moeglich"
 
     if value <= thresholds["pe_good"]:
         return 85, "Bewertung: KGV wirkt im Branchenkontext attraktiv/moderat"
@@ -739,15 +789,15 @@ def score_profitability(roe, thresholds):
     value = normalize_percent_value(roe)
 
     if value is None:
-        return None, "Profitabilität: ROE nicht verfügbar"
+        return None, "Profitabilitaet: ROE nicht verfuegbar"
 
     if value >= thresholds["roe_good"]:
-        return 85, "Profitabilität: ROE stark"
+        return 85, "Profitabilitaet: ROE stark"
 
     if value >= thresholds["roe_bad"]:
-        return 55, "Profitabilität: ROE solide"
+        return 55, "Profitabilitaet: ROE solide"
 
-    return 25, "Profitabilität: ROE schwach"
+    return 25, "Profitabilitaet: ROE schwach"
 
 
 def score_growth(revenue_growth, net_income_growth, thresholds):
@@ -767,7 +817,7 @@ def score_growth(revenue_growth, net_income_growth, thresholds):
             scores.append(25)
 
     if not scores:
-        return None, "Wachstum: Umsatz- und Gewinnwachstum nicht verfügbar"
+        return None, "Wachstum: Umsatz- und Gewinnwachstum nicht verfuegbar"
 
     average_score = sum(scores) / len(scores)
 
@@ -777,17 +827,17 @@ def score_growth(revenue_growth, net_income_growth, thresholds):
     if average_score >= 50:
         return average_score, "Wachstum: Umsatz/Gewinn wirken stabil bis moderat"
 
-    return average_score, "Wachstum: Umsatz/Gewinn wirken schwach oder rückläufig"
+    return average_score, "Wachstum: Umsatz/Gewinn wirken schwach oder ruecklaeufig"
 
 
 def score_leverage(debt_to_equity, thresholds, sector_profile):
     if sector_profile == "financial":
-        return None, "Verschuldung: bei Finanzwerten nicht über Standard-Debt/Equity bewertet"
+        return None, "Verschuldung: bei Finanzwerten nicht ueber Standard-Debt/Equity bewertet"
 
     value = to_float(debt_to_equity)
 
     if value is None:
-        return None, "Verschuldung: Debt/Equity nicht verfügbar"
+        return None, "Verschuldung: Debt/Equity nicht verfuegbar"
 
     if thresholds["debt_good"] is not None and value <= thresholds["debt_good"]:
         return 80, "Verschuldung: wirkt kontrolliert"
@@ -795,14 +845,14 @@ def score_leverage(debt_to_equity, thresholds, sector_profile):
     if thresholds["debt_bad"] is not None and value <= thresholds["debt_bad"]:
         return 55, "Verschuldung: wirkt beobachtenswert, aber nicht extrem"
 
-    return 25, "Verschuldung: wirkt erhöht"
+    return 25, "Verschuldung: wirkt erhoeht"
 
 
 def score_momentum(change_percent):
     value = normalize_percent_value(change_percent)
 
     if value is None:
-        return None, "Momentum: Tagesveränderung nicht verfügbar"
+        return None, "Momentum: Tagesveraenderung nicht verfuegbar"
 
     if value >= 2:
         return 75, "Momentum: kurzfristig positiv"
@@ -837,7 +887,7 @@ def analyze_news_sentiment(news_items):
         "optimistic",
         "expands",
         "launches",
-        "übertrifft",
+        "uebertrifft",
         "stark",
         "steigt",
         "gewinnsprung",
@@ -874,7 +924,7 @@ def analyze_news_sentiment(news_items):
         "risk",
         "risks",
         "verfehlt",
-        "fällt",
+        "faellt",
         "gewinnwarnung",
         "schwach",
         "klage",
@@ -935,12 +985,12 @@ def analyze_news_sentiment(news_items):
 def build_geopolitical_queries(company, used_symbol):
     sector = str(company.get("sector", "")).lower()
     industry = str(company.get("industry", "")).lower()
-    name = str(company.get("company_name", used_symbol))
+    company_name = str(company.get("company_name", used_symbol))
 
     if "technology" in sector or "semiconductor" in industry or "software" in industry:
         return [
-            f'"{name}" "export controls"',
-            f'"{name}" "supply chain"',
+            f'"{company_name}" "export controls"',
+            f'"{company_name}" "supply chain"',
             f'{used_symbol} "China"',
             f'{used_symbol} "Taiwan"',
             '"semiconductor" "export controls"',
@@ -951,8 +1001,8 @@ def build_geopolitical_queries(company, used_symbol):
 
     if "energy" in sector or "oil" in industry or "gas" in industry:
         return [
-            f'"{name}" "oil sanctions"',
-            f'"{name}" "energy security"',
+            f'"{company_name}" "oil sanctions"',
+            f'"{company_name}" "energy security"',
             f'{used_symbol} "Middle East"',
             f'{used_symbol} "Russia sanctions"',
             '"oil" "Middle East conflict"',
@@ -962,16 +1012,16 @@ def build_geopolitical_queries(company, used_symbol):
 
     if "financial" in sector or "bank" in industry:
         return [
-            f'"{name}" "banking risk"',
-            f'"{name}" "sanctions"',
+            f'"{company_name}" "banking risk"',
+            f'"{company_name}" "sanctions"',
             f'{used_symbol} "financial stability"',
             '"banking crisis" "interest rates"',
             '"sanctions" "financial markets"',
         ]
 
     return [
-        f'"{name}" "geopolitical risk"',
-        f'"{name}" "sanctions"',
+        f'"{company_name}" "geopolitical risk"',
+        f'"{company_name}" "sanctions"',
         f'{used_symbol} "supply chain"',
         '"geopolitical risk" "stocks"',
         '"sanctions" "global markets"',
@@ -1014,11 +1064,11 @@ def analyze_geopolitical_risk(articles):
         "krieg",
         "sanktionen",
         "exportkontrollen",
-        "militär",
+        "militaer",
         "konflikt",
-        "zölle",
+        "zoelle",
         "handelskrieg",
-        "lieferkettenstörung",
+        "lieferkettenstoerung",
         "eskalation",
     ]
 
@@ -1032,7 +1082,7 @@ def analyze_geopolitical_risk(articles):
         "supply chain",
         "uncertainty",
         "spannungen",
-        "beschränkungen",
+        "beschraenkungen",
         "regulierung",
         "ermittlung",
         "politisches risiko",
@@ -1097,13 +1147,13 @@ def score_news_sentiment(news_score):
     value = to_float(news_score)
 
     if value is None:
-        return None, "News: keine auswertbaren Nachrichten verfügbar"
+        return None, "News: keine auswertbaren Nachrichten verfuegbar"
 
     if value >= 2:
-        return 80, "News: Sentiment überwiegend positiv"
+        return 80, "News: Sentiment ueberwiegend positiv"
 
     if value <= -2:
-        return 30, "News: Sentiment überwiegend negativ"
+        return 30, "News: Sentiment ueberwiegend negativ"
 
     return 55, "News: Sentiment neutral bis gemischt"
 
@@ -1112,7 +1162,7 @@ def score_geopolitics(geopolitical_score):
     value = to_float(geopolitical_score)
 
     if value is None:
-        return None, "Geopolitik: keine auswertbaren Daten verfügbar"
+        return None, "Geopolitik: keine auswertbaren Daten verfuegbar"
 
     if value >= 70:
         return 80, "Geopolitik: Risiko wirkt aktuell niedrig"
@@ -1120,7 +1170,7 @@ def score_geopolitics(geopolitical_score):
     if value >= 40:
         return 55, "Geopolitik: Risiko wirkt moderat"
 
-    return 25, "Geopolitik: Risiko wirkt erhöht"
+    return 25, "Geopolitik: Risiko wirkt erhoeht"
 
 
 def calculate_professional_research_score(
@@ -1247,18 +1297,13 @@ def build_analysis(requested_ticker):
     roe = calculate_roe(metrics, ratios)
     debt_to_equity = calculate_debt_to_equity(ratios, metrics)
 
-    revenue_growth = growth_data["revenue_growth"]
-    net_income_growth = growth_data["net_income_growth"]
-    free_cash_flow_growth = growth_data["free_cash_flow_growth"]
-    eps_growth = growth_data["eps_growth"]
-
     research = calculate_professional_research_score(
         company=company,
         change_percent=change_percent,
         pe_ratio=pe_ratio,
         roe=roe,
-        revenue_growth=revenue_growth,
-        net_income_growth=net_income_growth,
+        revenue_growth=growth_data["revenue_growth"],
+        net_income_growth=growth_data["net_income_growth"],
         debt_to_equity=debt_to_equity,
         news_score=news_sentiment["score"],
         geopolitical_score=geo_risk["score"],
@@ -1276,14 +1321,42 @@ def build_analysis(requested_ticker):
         "pe_ratio": pe_ratio,
         "roe": roe,
         "debt_to_equity": debt_to_equity,
-        "revenue_growth": revenue_growth,
-        "net_income_growth": net_income_growth,
-        "free_cash_flow_growth": free_cash_flow_growth,
-        "eps_growth": eps_growth,
+        "revenue_growth": growth_data["revenue_growth"],
+        "net_income_growth": growth_data["net_income_growth"],
+        "free_cash_flow_growth": growth_data["free_cash_flow_growth"],
+        "eps_growth": growth_data["eps_growth"],
         "news_sentiment": news_sentiment,
         "geopolitical_risk": geo_risk,
         "research": research,
     }
+
+
+def format_symbol_search_result(index, item):
+    symbol = first_available(item.get("symbol"))
+    name = get_symbol_name(item)
+    exchange = get_symbol_exchange(item)
+    currency = get_symbol_currency(item)
+    result_type = get_symbol_type(item)
+
+    details = []
+
+    if exchange != "Unbekannt":
+        details.append(f"Boerse: {exchange}")
+
+    if currency != "Unbekannt":
+        details.append(f"Waehrung: {currency}")
+
+    if result_type != "Unbekannt":
+        details.append(f"Typ: {result_type}")
+
+    text = f"{index}. {symbol} - {name}\n"
+
+    if details:
+        text += f"   {' | '.join(details)}\n"
+
+    text += f"   Analyse: /analyse {symbol}\n"
+
+    return text
 
 
 def render_not_found(data):
@@ -1291,16 +1364,29 @@ def render_not_found(data):
     tried_symbols = data.get("tried_symbols", [])
     tried_text = ", ".join(tried_symbols) if tried_symbols else requested_ticker
 
+    suggestions = search_symbol_details(requested_ticker)
+    suggestion_text = ""
+
+    if suggestions:
+        suggestion_text += "\nMoegliche Treffer:\n\n"
+
+        for index, item in enumerate(suggestions[:5], start=1):
+            suggestion_text += format_symbol_search_result(index, item)
+            suggestion_text += "\n"
+
+        suggestion_text += (
+            "Tipp:\n"
+            "Kopiere das passende Symbol exakt in /analyse.\n"
+            "Beispiel: /analyse TTE\n\n"
+        )
+
     return (
-        f"Kein Börsendatensatz für {requested_ticker} gefunden.\n\n"
-        f"Geprüfte Symbole: {tried_text}\n\n"
-        "Nutze die Symbolsuche:\n"
+        f"Kein Boersendatensatz fuer {requested_ticker} gefunden.\n\n"
+        f"Gepruefte Symbole: {tried_text}\n\n"
+        f"{suggestion_text}"
+        "Du kannst auch direkt suchen:\n"
         f"/suche {requested_ticker}\n\n"
-        "Oder teste direkt:\n"
-        "/analyse AAPL\n"
-        "/analyse NVDA\n"
-        "/analyse MSFT\n\n"
-        "Hinweis: Manche Aktien werden je nach Datenpaket oder Börse unter anderen Kürzeln geführt."
+        "Hinweis: Manche Aktien werden je nach Datenanbieter oder Boerse unter anderen Kuerzeln gefuehrt."
     )
 
 
@@ -1327,14 +1413,14 @@ def render_compact_analysis(data):
         f"Branche: {company['sector']}\n\n"
         f"Signal: {research['signal']}\n"
         f"Score: {research['score']} / 100\n"
-        f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
+        f"Datenqualitaet: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
         f"News: {news['sentiment']} ({news['score']})\n"
         f"Geopolitik: {geo['risk_level']} ({geo['score']} / 100)\n\n"
         f"Kurs: {format_number(data['price'])} USD\n"
-        f"Änderung: {format_percent(data['change_percent'])}\n\n"
-        f"Top-Gründe:\n"
+        f"Aenderung: {format_percent(data['change_percent'])}\n\n"
+        f"Top-Gruende:\n"
         f"{top_reasons}\n"
-        f"Für Details:\n"
+        f"Fuer Details:\n"
         f"/details {data['requested_ticker']}\n\n"
         "Hinweis: Keine Anlageberatung."
     )
@@ -1362,7 +1448,7 @@ def render_detailed_analysis(data):
         for headline in news["headlines"]:
             headline_text += f"- {headline}\n"
     else:
-        headline_text = "- Keine aktuellen Headlines verfügbar\n"
+        headline_text = "- Keine aktuellen Headlines verfuegbar\n"
 
     geo_headline_text = ""
 
@@ -1370,16 +1456,16 @@ def render_detailed_analysis(data):
         for headline in geo["headlines"]:
             geo_headline_text += f"- {headline}\n"
     else:
-        geo_headline_text = "- Keine geopolitischen Headlines verfügbar\n"
+        geo_headline_text = "- Keine geopolitischen Headlines verfuegbar\n"
 
     if geo["risk_terms"]:
         risk_terms_text = ", ".join(geo["risk_terms"])
     else:
-        risk_terms_text = "Keine auffälligen Begriffe"
+        risk_terms_text = "Keine auffaelligen Begriffe"
 
     factor_text = (
         f"Bewertung: {research['factor_scores']['valuation']}\n"
-        f"Profitabilität: {research['factor_scores']['profitability']}\n"
+        f"Profitabilitaet: {research['factor_scores']['profitability']}\n"
         f"Wachstum: {research['factor_scores']['growth']}\n"
         f"Verschuldung: {research['factor_scores']['leverage']}\n"
         f"Momentum: {research['factor_scores']['momentum']}\n"
@@ -1388,7 +1474,7 @@ def render_detailed_analysis(data):
     )
 
     return (
-        f"Detailanalyse für {data['requested_ticker']}\n\n"
+        f"Detailanalyse fuer {data['requested_ticker']}\n\n"
         f"{used_symbol_note}"
         f"Unternehmen: {company['company_name']}\n"
         f"Branche: {company['sector']}\n"
@@ -1405,8 +1491,8 @@ def render_detailed_analysis(data):
         f"EPS-Wachstum: {format_percent(data['eps_growth'])}\n\n"
         f"Marktdaten\n"
         f"Kurs: {format_number(data['price'])} USD\n"
-        f"Änderung: {format_number(data['change'])}\n"
-        f"Änderung %: {format_percent(data['change_percent'])}\n"
+        f"Aenderung: {format_number(data['change'])}\n"
+        f"Aenderung %: {format_percent(data['change_percent'])}\n"
         f"Volumen: {data['volume']}\n\n"
         f"News-Sentiment\n"
         f"News-Score: {news['score']}\n"
@@ -1421,12 +1507,12 @@ def render_detailed_analysis(data):
         f"{geo_headline_text}"
         f"Professioneller Research-Score\n"
         f"Sektorprofil: {research['sector_profile']}\n"
-        f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
+        f"Datenqualitaet: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
         f"Score: {research['score']} / 100\n"
         f"Signal: {research['signal']}\n\n"
         f"Teilbewertungen:\n"
         f"{factor_text}\n"
-        f"Gründe:\n"
+        f"Gruende:\n"
         f"{notes_text}\n"
         "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
     )
@@ -1451,7 +1537,6 @@ def send_telegram_message(chat_id, text):
 
     try:
         requests.post(url, json=payload, timeout=10)
-
     except Exception:
         pass
 
@@ -1549,42 +1634,10 @@ def alert_worker():
     while True:
         try:
             check_alerts_once()
-
         except Exception:
             pass
 
         time.sleep(ALERT_INTERVAL_SECONDS)
-
-
-def format_symbol_search_result(index, item):
-    symbol = first_available(
-        item.get("symbol"),
-    )
-
-    name = get_symbol_name(item)
-    exchange = get_symbol_exchange(item)
-    currency = get_symbol_currency(item)
-    result_type = get_symbol_type(item)
-
-    details = []
-
-    if exchange != "Unbekannt":
-        details.append(f"Boerse: {exchange}")
-
-    if currency != "Unbekannt":
-        details.append(f"Waehrung: {currency}")
-
-    if result_type != "Unbekannt":
-        details.append(f"Typ: {result_type}")
-
-    text = f"{index}. {symbol} - {name}\n"
-
-    if details:
-        text += f"   {' | '.join(details)}\n"
-
-    text += f"   Analyse: /analyse {symbol}\n"
-
-    return text
 
 
 async def send_text(update, text):
@@ -1613,21 +1666,23 @@ async def send_text(update, text):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Bot läuft erfolgreich auf Render!\n\n"
-        "Nutze /help für alle Befehle."
+        "Bot laeuft erfolgreich auf Render!\n\n"
+        "Nutze /help fuer alle Befehle."
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Verfügbare Befehle:\n\n"
+        "Verfuegbare Befehle:\n\n"
         "/start - Bot starten\n"
         "/analyse AAPL - kompakte Analyse\n"
-        "/details AAPL - vollständige Detailanalyse\n"
+        "/details AAPL - vollstaendige Detailanalyse\n"
         "/watch AAPL - Ticker beobachten\n"
         "/unwatch AAPL - Ticker entfernen\n"
         "/watchlist - beobachtete Ticker anzeigen\n"
-        "/alerttest - Alert-Prüfung manuell starten\n"
+        "/alerttest - Alert-Pruefung manuell starten\n"
+        "/stocksync - Symbolkatalog von FMP laden\n"
+        "/symbolcount - Anzahl gespeicherter Symbole anzeigen\n"
         "/suche Toyota - Symbol weltweit suchen\n"
         "/info - Informationen zum Bot\n"
         "/help - Hilfe anzeigen"
@@ -1639,13 +1694,15 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Telegram Market Signal Bot\n\n"
         "Der Bot kann aktuell:\n"
         "- kompakte Analyse mit /analyse liefern\n"
-        "- ausführliche Detailanalyse mit /details liefern\n"
+        "- ausfuehrliche Detailanalyse mit /details liefern\n"
         "- Kursdaten, Fundamentaldaten und News-Sentiment auswerten\n"
-        "- Geopolitik-Risiko über GDELT einbeziehen\n"
+        "- Geopolitik-Risiko ueber GDELT einbeziehen\n"
         "- branchenspezifischen Research-Score berechnen\n"
         "- Ticker mit /watch beobachten\n"
         "- automatische News- und Geopolitik-Alerts senden\n"
-        "- globale Symbolsuche mit /suche nutzen\n\n"
+        "- globale Symbolsuche mit /suche nutzen\n"
+        "- Symbolkatalog mit /stocksync laden\n"
+        "- Anzahl gespeicherter Symbole mit /symbolcount anzeigen\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
@@ -1668,7 +1725,7 @@ async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not results:
         await update.message.reply_text(
-            f"Keine Symbole für '{query}' gefunden.\n\n"
+            f"Keine Symbole fuer '{query}' gefunden.\n\n"
             "Tipps:\n"
             "- Suche nach dem Unternehmensnamen, z. B. /suche Toyota\n"
             "- Suche nach dem bekannten Ticker, z. B. /suche AAPL\n"
@@ -1676,9 +1733,9 @@ async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    text = f"Suchergebnisse für '{query}':\n\n"
+    text = f"Suchergebnisse fuer '{query}':\n\n"
 
-    for index, item in enumerate(results[:10], start=1):
+    for index, item in enumerate(results[:15], start=1):
         text += format_symbol_search_result(index, item)
         text += "\n"
 
@@ -1746,7 +1803,7 @@ async def watch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"{ticker} wird jetzt beobachtet.\n\n"
-        "Du erhältst Alerts bei neuen Aktien-News oder geopolitischen Meldungen."
+        "Du erhaeltst Alerts bei neuen Aktien-News oder geopolitischen Meldungen."
     )
 
 
@@ -1797,13 +1854,56 @@ async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def alerttest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Alert-Prüfung wird jetzt einmal ausgeführt."
+        "Alert-Pruefung wird jetzt einmal ausgefuehrt."
     )
 
     check_alerts_once()
 
     await update.message.reply_text(
-        "Alert-Prüfung abgeschlossen."
+        "Alert-Pruefung abgeschlossen."
+    )
+
+
+async def stocksync(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Symbolkatalog wird jetzt von FMP geladen."
+    )
+
+    count = sync_symbol_cache()
+
+    if count <= 0:
+        await update.message.reply_text(
+            "Symbolkatalog konnte nicht geladen werden.\n"
+            "Bitte pruefe FMP_API_KEY und ob dein FMP-Tarif den stock-list Endpoint erlaubt."
+        )
+        return
+
+    await update.message.reply_text(
+        f"Symbolkatalog wurde aktualisiert.\n\n"
+        f"Gespeicherte Symbole: {count}\n\n"
+        "Teste jetzt z. B.:\n"
+        "/suche Shell\n"
+        "/suche TotalEnergies\n"
+        "/suche Toyota\n"
+        "/suche Samsung"
+    )
+
+
+async def symbolcount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    count = get_symbol_cache_count()
+    synced_at = get_symbol_cache_synced_at()
+
+    if not synced_at:
+        await update.message.reply_text(
+            "Es ist noch kein Symbolkatalog gespeichert.\n\n"
+            "Starte zuerst:\n/stocksync"
+        )
+        return
+
+    await update.message.reply_text(
+        f"Aktueller Symbolkatalog:\n\n"
+        f"Gespeicherte Symbole: {count}\n"
+        f"Sync-Zeitstempel: {synced_at}"
     )
 
 
@@ -1833,6 +1933,8 @@ def main():
     app.add_handler(CommandHandler("unwatch", unwatch))
     app.add_handler(CommandHandler("watchlist", watchlist))
     app.add_handler(CommandHandler("alerttest", alerttest))
+    app.add_handler(CommandHandler("stocksync", stocksync))
+    app.add_handler(CommandHandler("symbolcount", symbolcount))
     app.add_handler(CommandHandler("suche", suche))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
