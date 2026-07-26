@@ -289,16 +289,13 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     used_symbol, stock = find_best_symbol(requested_ticker)
 
     if not stock:
-        await update.message.reply_text(
-            "❌ Ticker nicht gefunden.\n\n"
-            "Teste zum Beispiel:\n"
-            "/analyse AAPL\n"
-            "/analyse NVDA\n"
-            "/analyse MSFT\n"
-            "/analyse SAP\n\n"
-            "Für manche deutsche Aktien braucht FMP andere Kürzel, z. B. SAP.DE oder SAPGY."
-        )
-        return
+    await update.message.reply_text(
+        f"❌ Kein Börsendatensatz für {requested_ticker} gefunden.\n"
+        f"Teste einmal:\n"
+        f"/analyse SAP.DE\n"
+        f"/analyse SAPGY"
+    )
+    return
 
     profile = get_company_profile(used_symbol)
     metrics = get_key_metrics(used_symbol)
