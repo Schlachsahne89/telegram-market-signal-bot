@@ -172,6 +172,21 @@ def get_financial_growth(symbol):
     )
 
 
+def get_stock_news(symbol):
+    data = fmp_request(
+        "news/stock",
+        {
+            "symbols": symbol,
+            "limit": 5,
+        },
+    )
+
+    if isinstance(data, list):
+        return data[:5]
+
+    return []
+
+
 def find_best_symbol(user_input):
     requested = user_input.upper().strip()
 
@@ -461,11 +476,12 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1,
             "debt_bad": 2,
             "weights": {
-                "valuation": 0.15,
-                "profitability": 0.20,
-                "growth": 0.35,
-                "leverage": 0.15,
-                "momentum": 0.15,
+                "valuation": 0.13,
+                "profitability": 0.18,
+                "growth": 0.30,
+                "leverage": 0.12,
+                "momentum": 0.12,
+                "news": 0.15,
             },
         },
         "financial": {
@@ -477,11 +493,12 @@ def get_sector_thresholds(sector_profile):
             "debt_good": None,
             "debt_bad": None,
             "weights": {
-                "valuation": 0.25,
-                "profitability": 0.35,
-                "growth": 0.25,
+                "valuation": 0.22,
+                "profitability": 0.30,
+                "growth": 0.20,
                 "leverage": 0.00,
-                "momentum": 0.15,
+                "momentum": 0.13,
+                "news": 0.15,
             },
         },
         "energy": {
@@ -493,11 +510,12 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1.5,
             "debt_bad": 3,
             "weights": {
-                "valuation": 0.25,
-                "profitability": 0.20,
-                "growth": 0.20,
-                "leverage": 0.20,
-                "momentum": 0.15,
+                "valuation": 0.22,
+                "profitability": 0.18,
+                "growth": 0.18,
+                "leverage": 0.17,
+                "momentum": 0.10,
+                "news": 0.15,
             },
         },
         "utilities": {
@@ -509,11 +527,12 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 2,
             "debt_bad": 4,
             "weights": {
-                "valuation": 0.20,
-                "profitability": 0.20,
-                "growth": 0.15,
-                "leverage": 0.30,
-                "momentum": 0.15,
+                "valuation": 0.18,
+                "profitability": 0.18,
+                "growth": 0.12,
+                "leverage": 0.27,
+                "momentum": 0.10,
+                "news": 0.15,
             },
         },
         "healthcare": {
@@ -525,11 +544,12 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1.2,
             "debt_bad": 2.5,
             "weights": {
-                "valuation": 0.20,
-                "profitability": 0.20,
-                "growth": 0.30,
-                "leverage": 0.15,
-                "momentum": 0.15,
+                "valuation": 0.18,
+                "profitability": 0.18,
+                "growth": 0.27,
+                "leverage": 0.12,
+                "momentum": 0.10,
+                "news": 0.15,
             },
         },
         "default": {
@@ -541,11 +561,12 @@ def get_sector_thresholds(sector_profile):
             "debt_good": 1,
             "debt_bad": 2,
             "weights": {
-                "valuation": 0.20,
-                "profitability": 0.25,
-                "growth": 0.25,
-                "leverage": 0.15,
-                "momentum": 0.15,
+                "valuation": 0.18,
+                "profitability": 0.22,
+                "growth": 0.22,
+                "leverage": 0.13,
+                "momentum": 0.10,
+                "news": 0.15,
             },
         },
     }
@@ -650,7 +671,157 @@ def score_momentum(change_percent):
     return 55, "Momentum: kurzfristig neutral"
 
 
-def calculate_professional_research_score(company, change_percent, pe_ratio, roe, revenue_growth, net_income_growth, debt_to_equity):
+def analyze_news_sentiment(news_items):
+    positive_keywords = [
+        "beat",
+        "beats",
+        "upgrade",
+        "upgraded",
+        "outperform",
+        "bullish",
+        "growth",
+        "record",
+        "strong",
+        "surge",
+        "rally",
+        "profit",
+        "profits",
+        "revenue growth",
+        "raises guidance",
+        "strong demand",
+        "partnership",
+        "approval",
+        "buy rating",
+        "positive",
+        "optimistic",
+        "expands",
+        "launches",
+    ]
+
+    negative_keywords = [
+        "miss",
+        "misses",
+        "downgrade",
+        "downgraded",
+        "underperform",
+        "bearish",
+        "lawsuit",
+        "probe",
+        "investigation",
+        "weak",
+        "decline",
+        "falls",
+        "drops",
+        "plunge",
+        "loss",
+        "losses",
+        "revenue decline",
+        "cuts guidance",
+        "weak demand",
+        "layoffs",
+        "recall",
+        "sell rating",
+        "negative",
+        "concern",
+        "concerns",
+        "risk",
+        "risks",
+    ]
+
+    score = 0
+    headlines = []
+
+    for item in news_items:
+        title = first_available(
+            item.get("title"),
+            item.get("headline"),
+        )
+
+        text = first_available(
+            item.get("text"),
+            item.get("snippet"),
+            item.get("summary"),
+            item.get("site"),
+        )
+
+        combined_text = f"{title} {text}".lower()
+
+        item_score = 0
+
+        for word in positive_keywords:
+            if word in combined_text:
+                item_score += 1
+
+        for word in negative_keywords:
+            if word in combined_text:
+                item_score -= 1
+
+        api_sentiment = first_available(
+            item.get("sentiment"),
+            item.get("sentimentScore"),
+        )
+
+        api_sentiment_text = str(api_sentiment).lower()
+
+        if "positive" in api_sentiment_text:
+            item_score += 1
+        elif "negative" in api_sentiment_text:
+            item_score -= 1
+
+        api_sentiment_number = to_float(api_sentiment)
+        if api_sentiment_number is not None:
+            if api_sentiment_number >= 0.25:
+                item_score += 1
+            elif api_sentiment_number <= -0.25:
+                item_score -= 1
+
+        if item_score > 0:
+            score += 1
+        elif item_score < 0:
+            score -= 1
+
+        if title != "Unbekannt":
+            headlines.append(title)
+
+    if score >= 2:
+        sentiment = "positiv"
+    elif score <= -2:
+        sentiment = "negativ"
+    else:
+        sentiment = "neutral"
+
+    return {
+        "score": score,
+        "sentiment": sentiment,
+        "headlines": headlines[:3],
+    }
+
+
+def score_news_sentiment(news_score):
+    value = to_float(news_score)
+
+    if value is None:
+        return None, "News: keine auswertbaren Nachrichten verfügbar"
+
+    if value >= 2:
+        return 80, "News: Sentiment überwiegend positiv"
+
+    if value <= -2:
+        return 30, "News: Sentiment überwiegend negativ"
+
+    return 55, "News: Sentiment neutral bis gemischt"
+
+
+def calculate_professional_research_score(
+    company,
+    change_percent,
+    pe_ratio,
+    roe,
+    revenue_growth,
+    net_income_growth,
+    debt_to_equity,
+    news_score,
+):
     sector_profile = detect_sector_profile(company["sector"], company["industry"])
     thresholds = get_sector_thresholds(sector_profile)
     weights = thresholds["weights"]
@@ -661,6 +832,7 @@ def calculate_professional_research_score(company, change_percent, pe_ratio, roe
         "growth": score_growth(revenue_growth, net_income_growth, thresholds),
         "leverage": score_leverage(debt_to_equity, thresholds, sector_profile),
         "momentum": score_momentum(change_percent),
+        "news": score_news_sentiment(news_score),
     }
 
     weighted_sum = 0
@@ -696,7 +868,7 @@ def calculate_professional_research_score(company, change_percent, pe_ratio, roe
         if value != "Unbekannt" and value != "Nicht gewichtet"
     )
 
-    if available_factors >= 4:
+    if available_factors >= 5:
         data_quality = "hoch"
     elif available_factors >= 3:
         data_quality = "mittel"
@@ -754,10 +926,11 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Volumen anzeigen\n"
         "✅ Unternehmensdaten anzeigen\n"
         "✅ KGV, ROE, Debt/Equity und Wachstum anzeigen\n"
+        "✅ News-Sentiment auswerten\n"
         "✅ branchenspezifischen Research-Score berechnen\n"
         "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
         "Nächster Ausbau:\n"
-        "News, Geopolitik, ETF-Daten und KI-Zusammenfassung.\n\n"
+        "Geopolitik, ETF-Daten und KI-Zusammenfassung.\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
@@ -840,6 +1013,8 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     metrics = get_key_metrics(used_symbol)
     ratios = get_ratios(used_symbol)
     growth = get_financial_growth(used_symbol)
+    news_items = get_stock_news(used_symbol)
+    news_sentiment = analyze_news_sentiment(news_items)
 
     company = extract_company_data(profile, metrics)
     growth_data = extract_growth_data(growth)
@@ -869,6 +1044,7 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         revenue_growth=revenue_growth,
         net_income_growth=net_income_growth,
         debt_to_equity=debt_to_equity,
+        news_score=news_sentiment["score"],
     )
 
     used_symbol_note = ""
@@ -876,8 +1052,15 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         used_symbol_note = f"Verwendetes FMP-Symbol: {used_symbol}\n\n"
 
     notes_text = ""
-    for note in research["notes"][:6]:
+    for note in research["notes"][:7]:
         notes_text += f"- {note}\n"
+
+    headline_text = ""
+    if news_sentiment["headlines"]:
+        for headline in news_sentiment["headlines"]:
+            headline_text += f"- {headline}\n"
+    else:
+        headline_text = "- Keine aktuellen Headlines verfügbar\n"
 
     factor_text = (
         f"Bewertung: {research['factor_scores']['valuation']}\n"
@@ -885,6 +1068,7 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Wachstum: {research['factor_scores']['growth']}\n"
         f"Verschuldung: {research['factor_scores']['leverage']}\n"
         f"Momentum: {research['factor_scores']['momentum']}\n"
+        f"News: {research['factor_scores']['news']}\n"
     )
 
     await update.message.reply_text(
@@ -908,6 +1092,11 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Änderung: {format_number(change)}\n"
         f"Änderung %: {format_percent(change_percent)}\n"
         f"Volumen: {volume}\n\n"
+        f"🗞 News-Sentiment\n"
+        f"News-Score: {news_sentiment['score']}\n"
+        f"Sentiment: {news_sentiment['sentiment']}\n"
+        f"Aktuelle Headlines:\n"
+        f"{headline_text}\n"
         f"🧠 Professioneller Research-Score\n"
         f"Sektorprofil: {research['sector_profile']}\n"
         f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
