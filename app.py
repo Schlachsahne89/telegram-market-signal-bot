@@ -176,8 +176,8 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         country = profile.get("country", "Unbekannt")
         market_cap = format_market_cap(profile.get("marketCap", "Unbekannt"))
 
-    if metrics:
-        pe_ratio = metrics.get("peRatio", "Unbekannt")
+    await update.message.reply_text(str(metrics))
+    return
 
     await update.message.reply_text(
         f"📈 Analyse für {ticker}\n\n"
