@@ -1,9 +1,9 @@
 import os
+import json
+import time
 import threading
 import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
-
-from openai import OpenAI
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -13,8 +13,9 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 PORT = int(os.getenv("PORT", 10000))
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+ALERT_INTERVAL_SECONDS = int(os.getenv("ALERT_INTERVAL_SECONDS", "900"))
+WATCHLIST_FILE = "watchlists.json"
+SEEN_ALERTS_FILE = "seen_alerts.json"
 
 
 TICKER_FALLBACKS = {
@@ -50,181 +51,214 @@ class HealthHandler(BaseHTTPRequestHandler):
         return
 
 
-def start_webserver():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    server.serve_forever()
+def start_*ebserver():
+    server = HTTPServe*(("0.0.0.0", PORT), HealthHandler)*    server.serve_forever()
 
 
-def fmp_request(endpoint, params):
-    if not FMP_API_KEY:
-        return None
+def l*ad_json_file(path, default):
+    t*y:
+        if not os.path.exists(p*th):
+            return default
 
-    url = f"https://financialmodelingprep.com/stable/{endpoint}"
+ *      with open(path, "r", encodin*="utf-8") as file:
+            ret*rn json.load(file)
 
-    request_params = dict(params)
-    request_params["apikey"] = FMP_API_KEY
+    except Exc*ption:
+        return default
+
+
+de* save_json_file(path, data):
+    t*y:
+        with open(path, "w", en*oding="utf-8") as file:
+          * json.dump(data, file, ensure_asci*=False, indent=2)
+    except Excep*ion:
+        pass
+
+
+def load_watch*ists():
+    return load_json_file(*ATCHLIST_FILE, {})
+
+
+def save_watc*lists(data):
+    save_json_file(WA*CHLIST_FILE, data)
+
+
+def load_seen*alerts():
+    return load_json_fil*(SEEN_ALERTS_FILE, {})
+
+
+def save_*een_alerts(data):
+    save_json_fi*e(SEEN_ALERTS_FILE, data)
+
+
+def fm*_request(endpoint, params):
+    if*not FMP_API_KEY:
+        return No*e
+
+    url = f"https://financialmo*elingprep.com/stable/{endpoint}"
+
+*   request_params = dict(params)
+ *  request_params["apikey"] = FMP_A*I_KEY
 
     try:
-        response = requests.get(url, params=request_params, timeout=15)
-        response.raise_for_status()
-        return response.json()
-    except Exception:
+        response =*requests.get(url, params=request_p*rams, timeout=15)
+        response*raise_for_status()
+        return *esponse.json()
+    except Exceptio*:
         return None
 
 
-def first_item(data):
+def first_*tem(data):
     if not data:
-        return None
+      * return None
 
-    if isinstance(data, list):
-        if len(data) == 0:
+    if isinstance(da*a, list):
+        if len(data) == *:
             return None
-        return data[0]
+        *eturn data[0]
 
-    if isinstance(data, dict):
+    if isinstance(d*ta, dict):
         return data
 
-    return None
+  * return None
 
 
-def fmp_get(endpoint, params):
-    return first_item(fmp_request(endpoint, params))
+def fmp_get(endpoin*, params):
+    return first_item(f*p_request(endpoint, params))
 
 
-def get_possible_symbols(user_input):
-    symbol = user_input.upper().strip()
+def*get_possible_symbols(user_input):
+*   symbol = user_input.upper().str*p()
 
-    if symbol in TICKER_FALLBACKS:
-        return TICKER_FALLBACKS[symbol]
+    if symbol in TICKER_FALLB*CKS:
+        return TICKER_FALLBAC*S[symbol]
 
     return [symbol]
 
 
-def search_symbols(query):
-    results = []
+d*f search_symbols(query):
+    resul*s = []
 
-    search_name_data = fmp_request("search-name", {"query": query})
-    if isinstance(search_name_data, list):
-        for item in search_name_data[:10]:
-            symbol = item.get("symbol")
-            if symbol and symbol not in results:
-                results.append(symbol)
+    search_name_data = fmp*request("search-name", {"query": q*ery})
+    if isinstance(search_nam*_data, list):
+        for item in *earch_name_data[:10]:
+            *ymbol = item.get("symbol")
+       *    if symbol and symbol not in re*ults:
+                results.appe*d(symbol)
 
-    search_symbol_data = fmp_request("search-symbol", {"query": query})
-    if isinstance(search_symbol_data, list):
-        for item in search_symbol_data[:10]:
-            symbol = item.get("symbol")
-            if symbol and symbol not in results:
-                results.append(symbol)
+    search_symbol_data * fmp_request("search-symbol", {"qu*ry": query})
+    if isinstance(sea*ch_symbol_data, list):
+        for*item in search_symbol_data[:10]:
+ *          symbol = item.get("symbo*")
+            if symbol and symbo* not in results:
+                r*sults.append(symbol)
 
-    return results
+    return r*sults
 
 
-def search_symbol_details(query):
+def search_symbol_details(*uery):
     details = []
 
-    search_name_data = fmp_request("search-name", {"query": query})
-    if isinstance(search_name_data, list):
-        details.extend(search_name_data[:10])
+    searc*_name_data = fmp_request("search-n*me", {"query": query})
+    if isin*tance(search_name_data, list):
+   *    details.extend(search_name_dat*[:10])
 
-    search_symbol_data = fmp_request("search-symbol", {"query": query})
-    if isinstance(search_symbol_data, list):
-        existing_symbols = {
-            item.get("symbol") for item in details if item.get("symbol")
+    search_symbol_data = f*p_request("search-symbol", {"query*: query})
+    if isinstance(search*symbol_data, list):
+        existi*g_symbols = {
+            item.get*"symbol") for item in details if i*em.get("symbol")
         }
 
-        for item in search_symbol_data[:10]:
-            symbol = item.get("symbol")
-            if symbol and symbol not in existing_symbols:
-                details.append(item)
+      * for item in search_symbol_data[:10]:
+            symbol = item.get("*ymbol")
+            if symbol and *ymbol not in existing_symbols:
+   *            details.append(item)
 
-    return details[:10]
-
-
-def get_stock_data(symbol):
-    return fmp_get("quote", {"symbol": symbol})
+*   return details[:10]
 
 
-def get_company_profile(symbol):
-    return fmp_get("profile", {"symbol": symbol})
+def get_s*ock_data(symbol):
+    return fmp_g*t("quote", {"symbol": symbol})
 
 
-def get_key_metrics(symbol):
+d*f get_company_profile(symbol):
+   *return fmp_get("profile", {"symbol*: symbol})
+
+
+def get_key_metrics(s*mbol):
     return fmp_get(
-        "key-metrics",
+       *"key-metrics",
         {
-            "symbol": symbol,
-            "period": "annual",
-            "limit": 1,
+         *  "symbol": symbol,
+            "p*riod": "annual",
+            "limi*": 1,
         },
     )
 
 
-def get_ratios(symbol):
+def get_r*tios(symbol):
     return fmp_get(
-        "ratios",
+*       "ratios",
         {
-            "symbol": symbol,
-            "period": "annual",
-            "limit": 1,
+       *    "symbol": symbol,
+            *period": "annual",
+            "li*it": 1,
         },
     )
 
 
-def get_financial_growth(symbol):
-    return fmp_get(
-        "financial-growth",
+def get*financial_growth(symbol):
+    retu*n fmp_get(
+        "financial-grow*h",
         {
-            "symbol": symbol,
-            "period": "annual",
+            "symbol"* symbol,
+            "period": "an*ual",
             "limit": 1,
-        },
+    *   },
     )
 
 
-def get_stock_news(symbol):
-    data = fmp_request(
+def get_stock_news(s*mbol, limit=5):
+    data = fmp_req*est(
         "news/stock",
-        {
+       *{
             "symbols": symbol,
-            "limit": 5,
-        },
+ *          "limit": limit,
+        *,
     )
 
-    if isinstance(data, list):
-        return data[:5]
+    if isinstance(data, l*st):
+        return data[:limit]
 
-    return []
+*   return []
 
 
-def get_geopolitical_news(query):
-    url = "https://api.gdeltproject.org/api/v2/doc/doc"
-
+def get_geopolitica*_news(query):
+    url = "https://a*i.gdeltproject.org/api/v2/doc/doc"*
     params = {
-        "query": query,
+        "query": q*ery,
         "mode": "ArtList",
-        "format": "json",
-        "maxrecords": 10,
-        "timespan": "7d",
+  *     "format": "json",
+        "ma*records": 10,
+        "timespan": *7d",
     }
 
     headers = {
-        "User-Agent": "TelegramMarketSignalBot/1.0"
+      * "User-Agent": "TelegramMarketSign*lBot/1.0"
     }
 
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=15)
-        response.raise_for_status()
+        *esponse = requests.get(url, params*params, headers=headers, timeout=1*)
+        response.raise_for_statu*()
         data = response.json()
+*        articles = data.get("artic*es", [])
 
-        articles = data.get("articles", [])
-
-        if isinstance(articles, list):
-            return articles[:10]
+        if isinstance(ar*icles, list):
+            return a*ticles[:10]
 
         return []
 
-    except Exception:
+  * except Exception:
         return []
 
 
@@ -725,9 +759,9 @@ def analyze_news_sentiment(news_items):
         "rally", "profit", "profits", "revenue growth",
         "raises guidance", "strong demand", "partnership",
         "approval", "buy rating", "positive", "optimistic",
-        "expands", "launches",
-        "übertrifft", "stark", "steigt", "gewinnsprung",
-        "angehoben", "positive prognose", "kooperation",
+        "expands", "launches", "übertrifft", "stark",
+        "steigt", "gewinnsprung", "angehoben",
+        "positive prognose", "kooperation",
     ]
 
     negative_keywords = [
@@ -769,26 +803,6 @@ def analyze_news_sentiment(news_items):
             if word in combined_text:
                 item_score -= 1
 
-        api_sentiment = first_available(
-            item.get("sentiment"),
-            item.get("sentimentScore"),
-        )
-
-        api_sentiment_text = str(api_sentiment).lower()
-
-        if "positive" in api_sentiment_text:
-            item_score += 1
-        elif "negative" in api_sentiment_text:
-            item_score -= 1
-
-        api_sentiment_number = to_float(api_sentiment)
-
-        if api_sentiment_number is not None:
-            if api_sentiment_number >= 0.25:
-                item_score += 1
-            elif api_sentiment_number <= -0.25:
-                item_score -= 1
-
         if item_score > 0:
             score += 1
         elif item_score < 0:
@@ -814,7 +828,6 @@ def analyze_news_sentiment(news_items):
 def build_geopolitical_queries(company, used_symbol):
     sector = str(company.get("sector", "")).lower()
     industry = str(company.get("industry", "")).lower()
-    country = str(company.get("country", "")).lower()
     company_name = str(company.get("company_name", used_symbol))
 
     if "technology" in sector or "semiconductor" in industry or "software" in industry:
@@ -853,26 +866,6 @@ def build_geopolitical_queries(company, used_symbol):
             '"Bankenkrise" "Zinsen"',
         ]
 
-    elif "industrial" in sector or "industrial" in industry:
-        queries = [
-            f'"{company_name}" "supply chain"',
-            f'"{company_name}" "tariffs"',
-            f'{used_symbol} "China"',
-            '"trade war" "supply chain"',
-            '"tariffs" "industrial companies"',
-            '"Lieferkette" "Zölle"',
-        ]
-
-    elif "health" in sector or "pharma" in industry or "biotech" in industry:
-        queries = [
-            f'"{company_name}" "drug regulation"',
-            f'"{company_name}" "supply chain"',
-            f'{used_symbol} "health policy"',
-            '"pharma" "regulation"',
-            '"biotech" "geopolitical risk"',
-            '"Pharma" "Regulierung"',
-        ]
-
     else:
         queries = [
             f'"{company_name}" "geopolitical risk"',
@@ -882,9 +875,6 @@ def build_geopolitical_queries(company, used_symbol):
             '"sanctions" "global markets"',
             '"Sanktionen" "Aktienmärkte"',
         ]
-
-    if country and country not in ["unbekannt", "unknown"]:
-        queries.append(f'"{company_name}" "{country}" "political risk"')
 
     return queries
 
@@ -916,8 +906,8 @@ def analyze_geopolitical_risk(articles):
         "war", "invasion", "sanctions", "export controls",
         "military", "blockade", "conflict", "tariffs",
         "trade war", "supply disruption", "escalation",
-        "krieg", "invasion", "sanktionen", "exportkontrollen",
-        "militär", "blockade", "konflikt", "zölle",
+        "krieg", "sanktionen", "exportkontrollen",
+        "militär", "konflikt", "zölle",
         "handelskrieg", "lieferkettenstörung", "eskalation",
     ]
 
@@ -1094,118 +1084,6 @@ def calculate_professional_research_score(
     }
 
 
-def build_ai_prompt(data):
-    company = data["company"]
-    research = data["research"]
-    news = data["news_sentiment"]
-    geo = data["geopolitical_risk"]
-
-    headlines = news.get("headlines", [])
-    geo_headlines = geo.get("headlines", [])
-
-    news_text = "\n".join([f"- {headline}" for headline in headlines]) if headlines else "Keine aktuellen Aktien-News verfügbar."
-    geo_text = "\n".join([f"- {headline}" for headline in geo_headlines]) if geo_headlines else "Keine geopolitischen Headlines verfügbar."
-
-    prompt = f"""
-Du bist ein vorsichtiger deutschsprachiger Finanz-Research-Assistent.
-
-Wichtig:
-- Keine Anlageberatung geben.
-- Keine sicheren Kauf- oder Verkaufsempfehlungen formulieren.
-- Nur die gelieferten Daten verwenden.
-- Wenn Daten fehlen, klar darauf hinweisen.
-- Kurz, präzise und verständlich schreiben.
-- Ausgabe auf Deutsch.
-
-Analysiere folgende Aktie:
-
-Ticker: {data["requested_ticker"]}
-Verwendetes Symbol: {data["used_symbol"]}
-
-Unternehmen:
-Name: {company["company_name"]}
-Branche: {company["sector"]}
-Industrie: {company["industry"]}
-Land: {company["country"]}
-Marktkapitalisierung: {format_market_cap(company["market_cap"])}
-
-Fundamentaldaten:
-KGV: {format_number(data["pe_ratio"])}
-ROE: {format_percent(data["roe"])}
-Debt/Equity: {format_number(data["debt_to_equity"])}
-Umsatzwachstum: {format_percent(data["revenue_growth"])}
-Gewinnwachstum: {format_percent(data["net_income_growth"])}
-Free-Cashflow-Wachstum: {format_percent(data["free_cash_flow_growth"])}
-EPS-Wachstum: {format_percent(data["eps_growth"])}
-
-Marktdaten:
-Kurs: {format_number(data["price"])} USD
-Tagesänderung: {format_percent(data["change_percent"])}
-Volumen: {data["volume"]}
-
-News:
-News-Sentiment: {news["sentiment"]}
-News-Score: {news["score"]}
-Headlines:
-{news_text}
-
-Geopolitik:
-Risiko-Level: {geo["risk_level"]}
-Geopolitik-Score: {geo["score"]} / 100
-Risikobegriffe: {", ".join(geo["risk_terms"]) if geo["risk_terms"] else "Keine auffälligen Begriffe"}
-Geopolitische Headlines:
-{geo_text}
-
-Quantitativer Research-Score:
-Sektorprofil: {research["sector_profile"]}
-Datenqualität: {research["data_quality"]}
-Score: {research["score"]} / 100
-Signal: {research["signal"]}
-
-Aufgabe:
-Erstelle ein kurzes KI-Fazit mit:
-1. Gesamtbild
-2. wichtigste positive Faktoren
-3. wichtigste Risikofaktoren
-4. Einordnung des Signals
-5. Hinweis, dass es keine Anlageberatung ist
-
-Maximal 7 Bulletpoints.
-"""
-    return prompt.strip()
-
-
-def generate_ai_summary(data):
-    if not OPENAI_API_KEY:
-        return (
-            "KI-Fazit: Nicht aktiv.\n"
-            "Grund: OPENAI_API_KEY ist nicht in Render gesetzt."
-        )
-
-    try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-
-        response = client.responses.create(
-            model=OPENAI_MODEL,
-            instructions=(
-                "Du bist ein vorsichtiger deutschsprachiger Finanz-Research-Assistent. "
-                "Du gibst keine Anlageberatung, sondern nur strukturierte Research-Hinweise."
-            ),
-            input=build_ai_prompt(data),
-            max_output_tokens=600,
-        )
-
-        text = response.output_text.strip()
-
-        if not text:
-            return "KI-Fazit: Keine verwertbare KI-Antwort erhalten."
-
-        return text
-
-    except Exception as exc:
-        return f"KI-Fazit konnte nicht erstellt werden: {exc}"
-
-
 def build_analysis(requested_ticker):
     used_symbol, stock, tried_symbols = find_best_symbol(requested_ticker)
 
@@ -1258,7 +1136,7 @@ def build_analysis(requested_ticker):
         geopolitical_score=geopolitical_risk["score"],
     )
 
-    result = {
+    return {
         "found": True,
         "requested_ticker": requested_ticker,
         "used_symbol": used_symbol,
@@ -1278,10 +1156,6 @@ def build_analysis(requested_ticker):
         "geopolitical_risk": geopolitical_risk,
         "research": research,
     }
-
-    result["ai_summary"] = generate_ai_summary(result)
-
-    return result
 
 
 def render_not_found(data):
@@ -1330,8 +1204,6 @@ def render_compact_analysis(data):
         f"Änderung: {format_percent(data['change_percent'])}\n\n"
         f"Top-Gründe:\n"
         f"{top_reasons}\n"
-        f"🤖 KI-Fazit:\n"
-        f"{data['ai_summary']}\n\n"
         f"Für Details:\n"
         f"/details {data['requested_ticker']}\n\n"
         "Hinweis: Keine Anlageberatung."
@@ -1419,10 +1291,122 @@ def render_detailed_analysis(data):
         f"{factor_text}\n"
         f"Gründe:\n"
         f"{notes_text}\n"
-        f"🤖 KI-Fazit:\n"
-        f"{data['ai_summary']}\n\n"
         "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
     )
+
+
+def make_alert_id(source, symbol, title):
+    raw = f"{source}|{symbol}|{title}"
+    return raw.lower().strip()
+
+
+def send_telegram_message(chat_id, text):
+    if not TOKEN:
+        return
+
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception:
+        pass
+
+
+def build_news_alert(symbol, title):
+    return (
+        f"🚨 Neue Aktienmeldung zu {symbol}\n\n"
+        f"{title}\n\n"
+        f"Analyse:\n"
+        f"/analyse {symbol}\n\n"
+        f"Details:\n"
+        f"/details {symbol}\n\n"
+        "Hinweis: Keine Anlageberatung."
+    )
+
+
+def build_geo_alert(symbol, title):
+    return (
+        f"🌍 Neue geopolitische Meldung zu {symbol}\n\n"
+        f"{title}\n\n"
+        f"Analyse:\n"
+        f"/analyse {symbol}\n\n"
+        f"Details:\n"
+        f"/details {symbol}\n\n"
+        "Hinweis: Keine Anlageberatung."
+    )
+
+
+def check_alerts_once():
+    watchlists = load_watchlists()
+    seen = load_seen_alerts()
+
+    changed = False
+
+    for chat_id, symbols in watchlists.items():
+        for requested_symbol in symbols:
+            used_symbol, stock, _ = find_best_symbol(requested_symbol)
+
+            if not stock:
+                continue
+
+            profile = get_company_profile(used_symbol)
+            metrics = get_key_metrics(used_symbol)
+            company = extract_company_data(profile, metrics)
+
+            stock_news = get_stock_news(used_symbol, limit=3)
+
+            for item in stock_news:
+                title = first_available(
+                    item.get("title"),
+                    item.get("headline"),
+                )
+
+                if title == "Unbekannt":
+                    continue
+
+                alert_id = make_alert_id("fmp_news", used_symbol, title)
+
+                if alert_id not in seen:
+                    seen[alert_id] = int(time.time())
+                    changed = True
+                    send_telegram_message(chat_id, build_news_alert(requested_symbol, title))
+
+            geo_articles = get_geopolitical_articles_with_fallback(company, used_symbol)
+
+            for article in geo_articles[:3]:
+                title = first_available(
+                    article.get("title"),
+                    article.get("seendate"),
+                )
+
+                if title == "Unbekannt":
+                    continue
+
+                alert_id = make_alert_id("gdelt_geo", used_symbol, title)
+
+                if alert_id not in seen:
+                    seen[alert_id] = int(time.time())
+                    changed = True
+                    send_telegram_message(chat_id, build_geo_alert(requested_symbol, title))
+
+    if changed:
+        save_seen_alerts(seen)
+
+
+def alert_worker():
+    while True:
+        try:
+            check_alerts_once()
+        except Exception:
+            pass
+
+        time.sleep(ALERT_INTERVAL_SECONDS)
 
 
 async def send_text(update, text):
@@ -1459,11 +1443,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📈 Verfügbare Befehle:\n\n"
-        "/start - Bot starten\n"
-        "/analyse AAPL - kompakte Analyse mit KI-Fazit\n"
+        "/analyse AAPL - kompakte Analyse\n"
         "/details AAPL - vollständige Detailanalyse\n"
-        "/analyse NVDA - kompakte Analyse mit KI-Fazit\n"
-        "/details NVDA - vollständige Detailanalyse\n"
+        "/watch AAPL - Ticker beobachten\n"
+        "/unwatch AAPL - Ticker entfernen\n"
+        "/watchlist - deine beobachteten Ticker anzeigen\n"
+        "/alerttest - Alert-Prüfung manuell starten\n"
         "/suche SAP - Symbolsuche starten\n"
         "/info - Informationen zum Bot\n"
         "/help - Hilfe anzeigen"
@@ -1479,10 +1464,8 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Kursdaten, Fundamentaldaten und News-Sentiment auswerten\n"
         "✅ Geopolitik-Risiko über GDELT einbeziehen\n"
         "✅ branchenspezifischen Research-Score berechnen\n"
-        "✅ KI-Fazit aus FMP + GDELT + News erzeugen\n"
-        "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
-        "Nächster Ausbau:\n"
-        "ETF-Daten, Watchlist und Alerts.\n\n"
+        "✅ Ticker mit /watch beobachten\n"
+        "✅ automatische News- und Geopolitik-Alerts senden\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
@@ -1566,6 +1549,87 @@ async def details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_text(update, render_detailed_analysis(data))
 
 
+async def watch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "Bitte nutze:\n/watch AAPL"
+        )
+        return
+
+    chat_id = str(update.effective_chat.id)
+    ticker = context.args[0].upper().strip()
+
+    watchlists = load_watchlists()
+    symbols = watchlists.get(chat_id, [])
+
+    if ticker not in symbols:
+        symbols.append(ticker)
+
+    watchlists[chat_id] = symbols
+    save_watchlists(watchlists)
+
+    await update.message.reply_text(
+        f"✅ {ticker} wird jetzt beobachtet.\n\n"
+        "Du erhältst Alerts bei neuen Aktien-News oder geopolitischen Meldungen."
+    )
+
+
+async def unwatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "Bitte nutze:\n/unwatch AAPL"
+        )
+        return
+
+    chat_id = str(update.effective_chat.id)
+    ticker = context.args[0].upper().strip()
+
+    watchlists = load_watchlists()
+    symbols = watchlists.get(chat_id, [])
+
+    if ticker in symbols:
+        symbols.remove(ticker)
+
+    watchlists[chat_id] = symbols
+    save_watchlists(watchlists)
+
+    await update.message.reply_text(
+        f"✅ {ticker} wurde aus deiner Watchlist entfernt."
+    )
+
+
+async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+
+    watchlists = load_watchlists()
+    symbols = watchlists.get(chat_id, [])
+
+    if not symbols:
+        await update.message.reply_text(
+            "Deine Watchlist ist leer.\n\n"
+            "Nutze z. B.:\n/watch AAPL"
+        )
+        return
+
+    text = "👀 Deine Watchlist:\n\n"
+    for symbol in symbols:
+        text += f"- {symbol}\n"
+
+    await update.message.reply_text(text)
+
+
+async def alerttest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔎 Alert-Prüfung wird jetzt einmal ausgeführt."
+    )
+
+    check_alerts_once()
+
+    await update.message.reply_text(
+        "✅ Alert-Prüfung abgeschlossen."
+    )
+
+
 def main():
     if not TOKEN:
         raise RuntimeError("TELEGRAM_TOKEN fehlt.")
@@ -1578,11 +1642,20 @@ def main():
         daemon=True,
     ).start()
 
+    threading.Thread(
+        target=alert_worker,
+        daemon=True,
+    ).start()
+
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analyse", analyse))
     app.add_handler(CommandHandler("details", details))
+    app.add_handler(CommandHandler("watch", watch))
+    app.add_handler(CommandHandler("unwatch", unwatch))
+    app.add_handler(CommandHandler("watchlist", watchlist))
+    app.add_handler(CommandHandler("alerttest", alerttest))
     app.add_handler(CommandHandler("suche", suche))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
