@@ -208,6 +208,18 @@ def to_float(value):
         return None
 
 
+def normalize_percent_value(value):
+    number = to_float(value)
+
+    if number is None:
+        return None
+
+    if abs(number) <= 1:
+        return number * 100
+
+    return number
+
+
 def format_market_cap(value):
     if value is None or value == "Unbekannt":
         return "Unbekannt"
@@ -243,18 +255,12 @@ def format_percent(value):
     if value is None or value == "Unbekannt":
         return "Unbekannt"
 
-    try:
-        number = to_float(value)
+    number = normalize_percent_value(value)
 
-        if number is None:
-            return "Unbekannt"
+    if number is None:
+        return "Unbekannt"
 
-        if abs(number) <= 1:
-            number = number * 100
-
-        return f"{number:.2f}%".replace(".", ",")
-    except Exception:
-        return str(value)
+    return f"{number:.2f}%".replace(".", ",")
 
 
 def calculate_pe_ratio(stock, metrics, ratios):
@@ -289,15 +295,14 @@ def calculate_pe_ratio(stock, metrics, ratios):
 
     for value in possible_values:
         if value is not None and value != "" and value != 0:
-            return format_number(value)
+            return value
 
     price = stock.get("price") if stock else None
     eps = stock.get("eps") if stock else None
 
     try:
         if price and eps and float(eps) != 0:
-            calculated_pe = float(price) / float(eps)
-            return format_number(calculated_pe)
+            return float(price) / float(eps)
     except Exception:
         pass
 
@@ -424,102 +429,295 @@ def extract_company_data(profile, metrics):
     }
 
 
-def basic_momentum_note(change_percent):
-    value = to_float(change_percent)
+def detect_sector_profile(sector, industry):
+    text = f"{sector} {industry}".lower()
+
+    if "financial" in text or "bank" in text or "insurance" in text:
+        return "financial"
+    if "technology" in text or "software" in text or "semiconductor" in text:
+        return "technology"
+    if "energy" in text or "oil" in text or "gas" in text:
+        return "energy"
+    if "utility" in text or "utilities" in text:
+        return "utilities"
+    if "health" in text or "pharma" in text or "biotech" in text:
+        return "healthcare"
+    if "consumer defensive" in text or "staples" in text:
+        return "defensive"
+    if "industrial" in text:
+        return "industrial"
+
+    return "default"
+
+
+def get_sector_thresholds(sector_profile):
+    profiles = {
+        "technology": {
+            "pe_good": 35,
+            "pe_bad": 70,
+            "roe_good": 15,
+            "roe_bad": 5,
+            "growth_good": 10,
+            "debt_good": 1,
+            "debt_bad": 2,
+            "weights": {
+                "valuation": 0.15,
+                "profitability": 0.20,
+                "growth": 0.35,
+                "leverage": 0.15,
+                "momentum": 0.15,
+            },
+        },
+        "financial": {
+            "pe_good": 15,
+            "pe_bad": 30,
+            "roe_good": 12,
+            "roe_bad": 5,
+            "growth_good": 5,
+            "debt_good": None,
+            "debt_bad": None,
+            "weights": {
+                "valuation": 0.25,
+                "profitability": 0.35,
+                "growth": 0.25,
+                "leverage": 0.00,
+                "momentum": 0.15,
+            },
+        },
+        "energy": {
+            "pe_good": 15,
+            "pe_bad": 35,
+            "roe_good": 12,
+            "roe_bad": 4,
+            "growth_good": 3,
+            "debt_good": 1.5,
+            "debt_bad": 3,
+            "weights": {
+                "valuation": 0.25,
+                "profitability": 0.20,
+                "growth": 0.20,
+                "leverage": 0.20,
+                "momentum": 0.15,
+            },
+        },
+        "utilities": {
+            "pe_good": 25,
+            "pe_bad": 45,
+            "roe_good": 10,
+            "roe_bad": 4,
+            "growth_good": 3,
+            "debt_good": 2,
+            "debt_bad": 4,
+            "weights": {
+                "valuation": 0.20,
+                "profitability": 0.20,
+                "growth": 0.15,
+                "leverage": 0.30,
+                "momentum": 0.15,
+            },
+        },
+        "healthcare": {
+            "pe_good": 30,
+            "pe_bad": 60,
+            "roe_good": 12,
+            "roe_bad": 4,
+            "growth_good": 7,
+            "debt_good": 1.2,
+            "debt_bad": 2.5,
+            "weights": {
+                "valuation": 0.20,
+                "profitability": 0.20,
+                "growth": 0.30,
+                "leverage": 0.15,
+                "momentum": 0.15,
+            },
+        },
+        "default": {
+            "pe_good": 25,
+            "pe_bad": 50,
+            "roe_good": 15,
+            "roe_bad": 5,
+            "growth_good": 5,
+            "debt_good": 1,
+            "debt_bad": 2,
+            "weights": {
+                "valuation": 0.20,
+                "profitability": 0.25,
+                "growth": 0.25,
+                "leverage": 0.15,
+                "momentum": 0.15,
+            },
+        },
+    }
+
+    return profiles.get(sector_profile, profiles["default"])
+
+
+def score_valuation(pe_ratio, thresholds):
+    pe_value = to_float(pe_ratio)
+
+    if pe_value is None or pe_value <= 0:
+        return None, "Bewertung: keine belastbare KGV-Bewertung möglich"
+
+    if pe_value <= thresholds["pe_good"]:
+        return 85, "Bewertung: KGV wirkt im Branchenkontext attraktiv/moderat"
+
+    if pe_value <= thresholds["pe_bad"]:
+        return 55, "Bewertung: KGV wirkt im Branchenkontext neutral bis ambitioniert"
+
+    return 25, "Bewertung: KGV wirkt im Branchenkontext hoch"
+
+
+def score_profitability(roe, thresholds):
+    roe_value = normalize_percent_value(roe)
+
+    if roe_value is None:
+        return None, "Profitabilität: ROE nicht verfügbar"
+
+    if roe_value >= thresholds["roe_good"]:
+        return 85, "Profitabilität: ROE stark"
+
+    if roe_value >= thresholds["roe_bad"]:
+        return 55, "Profitabilität: ROE solide"
+
+    return 25, "Profitabilität: ROE schwach"
+
+
+def score_growth(revenue_growth, net_income_growth, thresholds):
+    values = []
+
+    revenue_value = normalize_percent_value(revenue_growth)
+    income_value = normalize_percent_value(net_income_growth)
+
+    for value in [revenue_value, income_value]:
+        if value is None:
+            continue
+
+        if value > thresholds["growth_good"]:
+            values.append(85)
+        elif value >= 0:
+            values.append(60)
+        else:
+            values.append(25)
+
+    if not values:
+        return None, "Wachstum: Umsatz- und Gewinnwachstum nicht verfügbar"
+
+    avg_score = sum(values) / len(values)
+
+    if avg_score >= 75:
+        return avg_score, "Wachstum: Umsatz/Gewinn entwickeln sich stark"
+
+    if avg_score >= 50:
+        return avg_score, "Wachstum: Umsatz/Gewinn wirken stabil bis moderat"
+
+    return avg_score, "Wachstum: Umsatz/Gewinn wirken schwach oder rückläufig"
+
+
+def score_leverage(debt_to_equity, thresholds, sector_profile):
+    if sector_profile == "financial":
+        return None, "Verschuldung: bei Finanzwerten nicht über Standard-Debt/Equity bewertet"
+
+    debt_value = to_float(debt_to_equity)
+
+    if debt_value is None:
+        return None, "Verschuldung: Debt/Equity nicht verfügbar"
+
+    debt_good = thresholds["debt_good"]
+    debt_bad = thresholds["debt_bad"]
+
+    if debt_good is not None and debt_value <= debt_good:
+        return 80, "Verschuldung: wirkt kontrolliert"
+
+    if debt_bad is not None and debt_value <= debt_bad:
+        return 55, "Verschuldung: wirkt beobachtenswert, aber nicht extrem"
+
+    return 25, "Verschuldung: wirkt erhöht"
+
+
+def score_momentum(change_percent):
+    value = normalize_percent_value(change_percent)
 
     if value is None:
-        return "Kurzfristiges Momentum: nicht bewertbar"
+        return None, "Momentum: Tagesveränderung nicht verfügbar"
 
     if value >= 2:
-        return "Kurzfristiges Momentum: positiv"
+        return 75, "Momentum: kurzfristig positiv"
+
     if value <= -2:
-        return "Kurzfristiges Momentum: negativ"
+        return 35, "Momentum: kurzfristig negativ"
 
-    return "Kurzfristiges Momentum: neutral"
+    return 55, "Momentum: kurzfristig neutral"
 
 
-def calculate_research_score(change_percent, pe_ratio, roe, revenue_growth, net_income_growth, debt_to_equity):
-    score = 0
+def calculate_professional_research_score(company, change_percent, pe_ratio, roe, revenue_growth, net_income_growth, debt_to_equity):
+    sector_profile = detect_sector_profile(company["sector"], company["industry"])
+    thresholds = get_sector_thresholds(sector_profile)
+    weights = thresholds["weights"]
+
+    factor_results = {
+        "valuation": score_valuation(pe_ratio, thresholds),
+        "profitability": score_profitability(roe, thresholds),
+        "growth": score_growth(revenue_growth, net_income_growth, thresholds),
+        "leverage": score_leverage(debt_to_equity, thresholds, sector_profile),
+        "momentum": score_momentum(change_percent),
+    }
+
+    weighted_sum = 0
+    used_weight = 0
     notes = []
+    factor_scores = {}
 
-    change_value = to_float(change_percent)
-    pe_value = to_float(str(pe_ratio).replace(".", "").replace(",", "."))
-    roe_value = to_float(roe)
-    revenue_growth_value = to_float(revenue_growth)
-    net_income_growth_value = to_float(net_income_growth)
-    debt_to_equity_value = to_float(debt_to_equity)
+    for factor, result in factor_results.items():
+        factor_score, note = result
+        notes.append(note)
 
-    if change_value is not None:
-        if change_value >= 2:
-            score += 1
-            notes.append("Momentum positiv")
-        elif change_value <= -2:
-            score -= 1
-            notes.append("Momentum negativ")
+        if factor_score is None:
+            factor_scores[factor] = "Unbekannt"
+            continue
 
-    if pe_value is not None:
-        if 0 < pe_value <= 25:
-            score += 1
-            notes.append("KGV wirkt moderat")
-        elif pe_value > 50:
-            score -= 1
-            notes.append("KGV wirkt hoch")
+        weight = weights.get(factor, 0)
 
-    if roe_value is not None:
-        if abs(roe_value) <= 1:
-            roe_value = roe_value * 100
+        if weight <= 0:
+            factor_scores[factor] = "Nicht gewichtet"
+            continue
 
-        if roe_value >= 15:
-            score += 1
-            notes.append("ROE stark")
-        elif roe_value < 5:
-            score -= 1
-            notes.append("ROE schwach")
+        weighted_sum += factor_score * weight
+        used_weight += weight
+        factor_scores[factor] = round(factor_score, 1)
 
-    if revenue_growth_value is not None:
-        if abs(revenue_growth_value) <= 1:
-            revenue_growth_value = revenue_growth_value * 100
+    if used_weight == 0:
+        final_score = 50
+    else:
+        final_score = weighted_sum / used_weight
 
-        if revenue_growth_value > 5:
-            score += 1
-            notes.append("Umsatzwachstum positiv")
-        elif revenue_growth_value < 0:
-            score -= 1
-            notes.append("Umsatzwachstum negativ")
+    available_factors = sum(
+        1 for value in factor_scores.values()
+        if value != "Unbekannt" and value != "Nicht gewichtet"
+    )
 
-    if net_income_growth_value is not None:
-        if abs(net_income_growth_value) <= 1:
-            net_income_growth_value = net_income_growth_value * 100
+    if available_factors >= 4:
+        data_quality = "hoch"
+    elif available_factors >= 3:
+        data_quality = "mittel"
+    else:
+        data_quality = "niedrig"
 
-        if net_income_growth_value > 5:
-            score += 1
-            notes.append("Gewinnwachstum positiv")
-        elif net_income_growth_value < 0:
-            score -= 1
-            notes.append("Gewinnwachstum negativ")
-
-    if debt_to_equity_value is not None:
-        if debt_to_equity_value <= 1:
-            score += 1
-            notes.append("Verschuldung wirkt kontrolliert")
-        elif debt_to_equity_value > 2:
-            score -= 1
-            notes.append("Verschuldung erhöht")
-
-    if score >= 3:
+    if final_score >= 70:
         signal = "LONG-KANDIDAT"
-    elif score <= -2:
+    elif final_score <= 40:
         signal = "SHORT-/RISIKO-KANDIDAT"
     else:
         signal = "NEUTRAL"
 
-    if not notes:
-        notes.append("Zu wenige Fundamentaldaten für Score verfügbar")
-
     return {
-        "score": score,
+        "score": round(final_score, 1),
         "signal": signal,
         "notes": notes,
+        "sector_profile": sector_profile,
+        "data_quality": data_quality,
+        "available_factors": available_factors,
+        "factor_scores": factor_scores,
     }
 
 
@@ -555,13 +753,8 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Kursänderung anzeigen\n"
         "✅ Volumen anzeigen\n"
         "✅ Unternehmensdaten anzeigen\n"
-        "✅ Branche, Industrie, Land und Marktkapitalisierung anzeigen\n"
-        "✅ KGV mit mehreren Fallbacks anzeigen\n"
-        "✅ ROE anzeigen\n"
-        "✅ Umsatzwachstum anzeigen\n"
-        "✅ Gewinnwachstum anzeigen\n"
-        "✅ Debt/Equity anzeigen\n"
-        "✅ einfachen Research-Score berechnen\n"
+        "✅ KGV, ROE, Debt/Equity und Wachstum anzeigen\n"
+        "✅ branchenspezifischen Research-Score berechnen\n"
         "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
         "Nächster Ausbau:\n"
         "News, Geopolitik, ETF-Daten und KI-Zusammenfassung.\n\n"
@@ -612,27 +805,6 @@ async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "\nNutze dann z. B.:\n/analyse SYMBOL"
 
     await update.message.reply_text(text)
-
-
-def search_symbol_details(query):
-    details = []
-
-    search_name_data = fmp_request("search-name", {"query": query})
-    if isinstance(search_name_data, list):
-        details.extend(search_name_data[:10])
-
-    search_symbol_data = fmp_request("search-symbol", {"query": query})
-    if isinstance(search_symbol_data, list):
-        existing_symbols = {
-            item.get("symbol") for item in details if item.get("symbol")
-        }
-
-        for item in search_symbol_data[:10]:
-            symbol = item.get("symbol")
-            if symbol and symbol not in existing_symbols:
-                details.append(item)
-
-    return details[:10]
 
 
 async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -689,9 +861,8 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     free_cash_flow_growth = growth_data["free_cash_flow_growth"]
     eps_growth = growth_data["eps_growth"]
 
-    momentum_note = basic_momentum_note(change_percent)
-
-    research = calculate_research_score(
+    research = calculate_professional_research_score(
+        company=company,
         change_percent=change_percent,
         pe_ratio=pe_ratio,
         roe=roe,
@@ -705,8 +876,16 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         used_symbol_note = f"Verwendetes FMP-Symbol: {used_symbol}\n\n"
 
     notes_text = ""
-    for note in research["notes"][:5]:
+    for note in research["notes"][:6]:
         notes_text += f"- {note}\n"
+
+    factor_text = (
+        f"Bewertung: {research['factor_scores']['valuation']}\n"
+        f"Profitabilität: {research['factor_scores']['profitability']}\n"
+        f"Wachstum: {research['factor_scores']['growth']}\n"
+        f"Verschuldung: {research['factor_scores']['leverage']}\n"
+        f"Momentum: {research['factor_scores']['momentum']}\n"
+    )
 
     await update.message.reply_text(
         f"📈 Analyse für {requested_ticker}\n\n"
@@ -716,8 +895,8 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Industrie: {company['industry']}\n"
         f"Land: {company['country']}\n"
         f"Marktkapitalisierung: {format_market_cap(company['market_cap'])}\n\n"
-        f"📊 Bewertung & Fundamentaldaten\n"
-        f"KGV: {pe_ratio}\n"
+        f"📊 Fundamentaldaten\n"
+        f"KGV: {format_number(pe_ratio)}\n"
         f"ROE: {format_percent(roe)}\n"
         f"Debt/Equity: {format_number(debt_to_equity)}\n"
         f"Umsatzwachstum: {format_percent(revenue_growth)}\n"
@@ -729,10 +908,13 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Änderung: {format_number(change)}\n"
         f"Änderung %: {format_percent(change_percent)}\n"
         f"Volumen: {volume}\n\n"
-        f"🧭 Einschätzung\n"
-        f"{momentum_note}\n"
-        f"Research-Score: {research['score']}\n"
+        f"🧠 Professioneller Research-Score\n"
+        f"Sektorprofil: {research['sector_profile']}\n"
+        f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
+        f"Score: {research['score']} / 100\n"
         f"Signal: {research['signal']}\n\n"
+        f"Teilbewertungen:\n"
+        f"{factor_text}\n"
         f"Gründe:\n"
         f"{notes_text}\n"
         "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
