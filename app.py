@@ -72,6 +72,7 @@ def save_json_file(path, data):
     try:
         with open(path, "w", encoding="utf-8") as file:
             json.dump(data, file, ensure_ascii=False, indent=2)
+
     except Exception:
         pass
 
@@ -105,6 +106,7 @@ def fmp_request(endpoint, params):
         response = requests.get(url, params=request_params, timeout=15)
         response.raise_for_status()
         return response.json()
+
     except Exception:
         return None
 
@@ -132,6 +134,7 @@ def first_available(*values):
     for value in values:
         if value is not None and value != "" and value != 0 and value != "Unbekannt":
             return value
+
     return "Unbekannt"
 
 
@@ -142,6 +145,7 @@ def to_float(value):
     try:
         text = str(value).replace("%", "").replace(",", ".")
         return float(text)
+
     except Exception:
         return None
 
@@ -165,6 +169,7 @@ def format_number(value):
     try:
         number = float(value)
         return f"{number:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
     except Exception:
         return str(value)
 
@@ -190,8 +195,10 @@ def format_market_cap(value):
 
         if value >= 1_000_000_000_000:
             return f"{value / 1_000_000_000_000:.2f} Bio. USD"
+
         if value >= 1_000_000_000:
             return f"{value / 1_000_000_000:.2f} Mrd. USD"
+
         if value >= 1_000_000:
             return f"{value / 1_000_000:.2f} Mio. USD"
 
@@ -214,16 +221,20 @@ def search_symbols(query):
     results = []
 
     data_name = fmp_request("search-name", {"query": query})
+
     if isinstance(data_name, list):
         for item in data_name[:10]:
             symbol = item.get("symbol")
+
             if symbol and symbol not in results:
                 results.append(symbol)
 
     data_symbol = fmp_request("search-symbol", {"query": query})
+
     if isinstance(data_symbol, list):
         for item in data_symbol[:10]:
             symbol = item.get("symbol")
+
             if symbol and symbol not in results:
                 results.append(symbol)
 
@@ -234,15 +245,22 @@ def search_symbol_details(query):
     details = []
 
     data_name = fmp_request("search-name", {"query": query})
+
     if isinstance(data_name, list):
         details.extend(data_name[:10])
 
     data_symbol = fmp_request("search-symbol", {"query": query})
+
     if isinstance(data_symbol, list):
-        existing = {item.get("symbol") for item in details if item.get("symbol")}
+        existing = {
+            item.get("symbol")
+            for item in details
+            if item.get("symbol")
+        }
 
         for item in data_symbol[:10]:
             symbol = item.get("symbol")
+
             if symbol and symbol not in existing:
                 details.append(item)
 
@@ -254,12 +272,14 @@ def find_best_symbol(user_input):
     candidates = get_possible_symbols(requested)
 
     searched = search_symbols(requested)
+
     for symbol in searched:
         if symbol not in candidates:
             candidates.append(symbol)
 
     for symbol in candidates:
         stock = get_stock_data(symbol)
+
         if stock:
             return symbol, stock, candidates
 
@@ -341,7 +361,6 @@ def get_geopolitical_news(query):
         response = requests.get(url, params=params, headers=headers, timeout=15)
         response.raise_for_status()
         data = response.json()
-
         articles = data.get("articles", [])
 
         if isinstance(articles, list):
@@ -393,6 +412,7 @@ def calculate_pe_ratio(stock, metrics, ratios):
     try:
         if price and eps and float(eps) != 0:
             return float(price) / float(eps)
+
     except Exception:
         pass
 
@@ -518,14 +538,19 @@ def detect_sector_profile(sector, industry):
 
     if "financial" in text or "bank" in text or "insurance" in text:
         return "financial"
+
     if "technology" in text or "software" in text or "semiconductor" in text:
         return "technology"
+
     if "energy" in text or "oil" in text or "gas" in text:
         return "energy"
+
     if "utility" in text or "utilities" in text:
         return "utilities"
+
     if "health" in text or "pharma" in text or "biotech" in text:
         return "healthcare"
+
     if "industrial" in text:
         return "industrial"
 
@@ -642,7 +667,7 @@ def score_profitability(roe, thresholds):
 
 
 def score_growth(revenue_growth, net_income_growth, thresholds):
-    values = []
+    scores = []
 
     for raw_value in [revenue_growth, net_income_growth]:
         value = normalize_percent_value(raw_value)
@@ -651,24 +676,24 @@ def score_growth(revenue_growth, net_income_growth, thresholds):
             continue
 
         if value > thresholds["growth_good"]:
-            values.append(85)
+            scores.append(85)
         elif value >= 0:
-            values.append(60)
+            scores.append(60)
         else:
-            values.append(25)
+            scores.append(25)
 
-    if not values:
+    if not scores:
         return None, "Wachstum: Umsatz- und Gewinnwachstum nicht verfügbar"
 
-    avg = sum(values) / len(values)
+    average_score = sum(scores) / len(scores)
 
-    if avg >= 75:
-        return avg, "Wachstum: Umsatz/Gewinn entwickeln sich stark"
+    if average_score >= 75:
+        return average_score, "Wachstum: Umsatz/Gewinn entwickeln sich stark"
 
-    if avg >= 50:
-        return avg, "Wachstum: Umsatz/Gewinn wirken stabil bis moderat"
+    if average_score >= 50:
+        return average_score, "Wachstum: Umsatz/Gewinn wirken stabil bis moderat"
 
-    return avg, "Wachstum: Umsatz/Gewinn wirken schwach oder rückläufig"
+    return average_score, "Wachstum: Umsatz/Gewinn wirken schwach oder rückläufig"
 
 
 def score_leverage(debt_to_equity, thresholds, sector_profile):
@@ -708,20 +733,19 @@ def analyze_news_sentiment(news_items):
     positive_keywords = [
         "beat", "beats", "upgrade", "upgraded", "outperform",
         "bullish", "growth", "record", "strong", "surge",
-        "rally", "profit", "profits", "revenue growth",
-        "raises guidance", "strong demand", "partnership",
-        "approval", "buy rating", "positive", "optimistic",
-        "expands", "launches", "übertrifft", "stark",
-        "steigt", "gewinnsprung", "angehoben",
-        "positive prognose", "kooperation",
+        "rally", "profit", "profits", "raises guidance",
+        "strong demand", "partnership", "approval", "buy rating",
+        "positive", "optimistic", "expands", "launches",
+        "übertrifft", "stark", "steigt", "gewinnsprung",
+        "angehoben", "positive prognose", "kooperation",
     ]
 
     negative_keywords = [
         "miss", "misses", "downgrade", "downgraded", "underperform",
         "bearish", "lawsuit", "probe", "investigation", "weak",
         "decline", "falls", "drops", "plunge", "loss", "losses",
-        "revenue decline", "cuts guidance", "weak demand", "layoffs",
-        "recall", "sell rating", "negative", "concern", "concerns",
+        "cuts guidance", "weak demand", "layoffs", "recall",
+        "sell rating", "negative", "concern", "concerns",
         "risk", "risks", "verfehlt", "fällt", "gewinnwarnung",
         "schwach", "klage", "ermittlungen", "risiko",
         "stellenabbau", "senkt prognose",
@@ -731,10 +755,18 @@ def analyze_news_sentiment(news_items):
     headlines = []
 
     for item in news_items:
-        title = first_available(item.get("title"), item.get("headline"))
-        text = first_available(item.get("text"), item.get("snippet"), item.get("summary"))
-        combined = f"{title} {text}".lower()
+        title = first_available(
+            item.get("title"),
+            item.get("headline"),
+        )
 
+        text = first_available(
+            item.get("text"),
+            item.get("snippet"),
+            item.get("summary"),
+        )
+
+        combined = f"{title} {text}".lower()
         item_score = 0
 
         for keyword in positive_keywords:
@@ -814,7 +846,7 @@ def build_geopolitical_queries(company, used_symbol):
 
 
 def get_geopolitical_articles_with_fallback(company, used_symbol):
-    all_articles = []
+    articles_all = []
     seen_titles = set()
 
     for query in build_geopolitical_queries(company, used_symbol):
@@ -824,13 +856,13 @@ def get_geopolitical_articles_with_fallback(company, used_symbol):
             title = article.get("title")
 
             if title and title not in seen_titles:
-                all_articles.append(article)
+                articles_all.append(article)
                 seen_titles.add(title)
 
-        if len(all_articles) >= 5:
+        if len(articles_all) >= 5:
             break
 
-    return all_articles[:10]
+    return articles_all[:10]
 
 
 def analyze_geopolitical_risk(articles):
@@ -856,8 +888,16 @@ def analyze_geopolitical_risk(articles):
     headlines = []
 
     for article in articles:
-        title = first_available(article.get("title"), article.get("seendate"))
-        domain = first_available(article.get("domain"), article.get("sourceCountry"))
+        title = first_available(
+            article.get("title"),
+            article.get("seendate"),
+        )
+
+        domain = first_available(
+            article.get("domain"),
+            article.get("sourceCountry"),
+        )
+
         combined = f"{title} {domain}".lower()
 
         for keyword in high_keywords:
@@ -883,6 +923,7 @@ def analyze_geopolitical_risk(articles):
         level = "hoch"
 
     unique_risks = []
+
     for item in risk_hits:
         if item not in unique_risks:
             unique_risks.append(item)
@@ -936,7 +977,11 @@ def calculate_professional_research_score(
     news_score,
     geopolitical_score,
 ):
-    sector_profile = detect_sector_profile(company["sector"], company["industry"])
+    sector_profile = detect_sector_profile(
+        company["sector"],
+        company["industry"],
+    )
+
     thresholds = get_sector_thresholds(sector_profile)
     weights = thresholds["weights"]
 
@@ -979,7 +1024,8 @@ def calculate_professional_research_score(
         final_score = weighted_sum / used_weight
 
     available_factors = sum(
-        1 for value in factor_scores.values()
+        1
+        for value in factor_scores.values()
         if value != "Unbekannt" and value != "Nicht gewichtet"
     )
 
@@ -1022,6 +1068,7 @@ def build_analysis(requested_ticker):
     metrics = get_key_metrics(used_symbol)
     ratios = get_ratios(used_symbol)
     growth = get_financial_growth(used_symbol)
+
     news_items = get_stock_news(used_symbol)
     news_sentiment = analyze_news_sentiment(news_items)
 
@@ -1088,7 +1135,7 @@ def render_not_found(data):
     tried_text = ", ".join(tried_symbols) if tried_symbols else requested_ticker
 
     return (
-        f"❌ Kein Börsendatensatz für {requested_ticker} gefunden.\n\n"
+        f"Kein Börsendatensatz für {requested_ticker} gefunden.\n\n"
         f"Geprüfte Symbole: {tried_text}\n\n"
         "Nutze die Symbolsuche:\n"
         f"/suche {requested_ticker}\n\n"
@@ -1107,15 +1154,17 @@ def render_compact_analysis(data):
     geo = data["geopolitical_risk"]
 
     used_symbol_note = ""
+
     if data["used_symbol"] != data["requested_ticker"]:
         used_symbol_note = f"Symbol: {data['used_symbol']}\n"
 
     top_reasons = ""
+
     for note in research["notes"][:3]:
         top_reasons += f"- {note}\n"
 
     return (
-        f"📈 {data['requested_ticker']} Kurz-Analyse\n\n"
+        f"{data['requested_ticker']} Kurz-Analyse\n\n"
         f"{used_symbol_note}"
         f"Unternehmen: {company['company_name']}\n"
         f"Branche: {company['sector']}\n\n"
@@ -1141,14 +1190,17 @@ def render_detailed_analysis(data):
     geo = data["geopolitical_risk"]
 
     used_symbol_note = ""
+
     if data["used_symbol"] != data["requested_ticker"]:
         used_symbol_note = f"Verwendetes FMP-Symbol: {data['used_symbol']}\n\n"
 
     notes_text = ""
+
     for note in research["notes"][:8]:
         notes_text += f"- {note}\n"
 
     headline_text = ""
+
     if news["headlines"]:
         for headline in news["headlines"]:
             headline_text += f"- {headline}\n"
@@ -1156,13 +1208,17 @@ def render_detailed_analysis(data):
         headline_text = "- Keine aktuellen Headlines verfügbar\n"
 
     geo_headline_text = ""
+
     if geo["headlines"]:
         for headline in geo["headlines"]:
             geo_headline_text += f"- {headline}\n"
     else:
         geo_headline_text = "- Keine geopolitischen Headlines verfügbar\n"
 
-    risk_terms_text = ", ".join(geo["risk_terms"]) if geo["risk_terms"] else "Keine auffälligen Begriffe"
+    if geo["risk_terms"]:
+        risk_terms_text = ", ".join(geo["risk_terms"])
+    else:
+        risk_terms_text = "Keine auffälligen Begriffe"
 
     factor_text = (
         f"Bewertung: {research['factor_scores']['valuation']}\n"
@@ -1175,14 +1231,14 @@ def render_detailed_analysis(data):
     )
 
     return (
-        f"📊 Detailanalyse für {data['requested_ticker']}\n\n"
+        f"Detailanalyse für {data['requested_ticker']}\n\n"
         f"{used_symbol_note}"
         f"Unternehmen: {company['company_name']}\n"
         f"Branche: {company['sector']}\n"
         f"Industrie: {company['industry']}\n"
         f"Land: {company['country']}\n"
         f"Marktkapitalisierung: {format_market_cap(company['market_cap'])}\n\n"
-        f"📊 Fundamentaldaten\n"
+        f"Fundamentaldaten\n"
         f"KGV: {format_number(data['pe_ratio'])}\n"
         f"ROE: {format_percent(data['roe'])}\n"
         f"Debt/Equity: {format_number(data['debt_to_equity'])}\n"
@@ -1190,23 +1246,23 @@ def render_detailed_analysis(data):
         f"Gewinnwachstum: {format_percent(data['net_income_growth'])}\n"
         f"Free-Cashflow-Wachstum: {format_percent(data['free_cash_flow_growth'])}\n"
         f"EPS-Wachstum: {format_percent(data['eps_growth'])}\n\n"
-        f"💵 Marktdaten\n"
+        f"Marktdaten\n"
         f"Kurs: {format_number(data['price'])} USD\n"
         f"Änderung: {format_number(data['change'])}\n"
         f"Änderung %: {format_percent(data['change_percent'])}\n"
         f"Volumen: {data['volume']}\n\n"
-        f"🗞 News-Sentiment\n"
+        f"News-Sentiment\n"
         f"News-Score: {news['score']}\n"
         f"Sentiment: {news['sentiment']}\n"
         f"Aktuelle Headlines:\n"
-        f"{headline_text}\n"
-        f"🌍 Geopolitik-Risiko\n"
+        f"{headline_text}"
+        f"Geopolitik-Risiko\n"
         f"Risiko: {geo['risk_level']}\n"
         f"Score: {geo['score']} / 100\n"
         f"Risikobegriffe: {risk_terms_text}\n"
         f"Geopolitische Headlines:\n"
-        f"{geo_headline_text}\n"
-        f"🧠 Professioneller Research-Score\n"
+        f"{geo_headline_text}"
+        f"Professioneller Research-Score\n"
         f"Sektorprofil: {research['sector_profile']}\n"
         f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
         f"Score: {research['score']} / 100\n"
@@ -1217,6 +1273,130 @@ def render_detailed_analysis(data):
         f"{notes_text}\n"
         "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
     )
+
+
+def make_alert_id(source, symbol, title):
+    raw = f"{source}|{symbol}|{title}"
+    return raw.lower().strip()
+
+
+def send_telegram_message(chat_id, text):
+    if not TOKEN:
+        return
+
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+
+    try:
+        requests.post(url, json=payload, timeout=10)
+
+    except Exception:
+        pass
+
+
+def build_news_alert(symbol, title):
+    return (
+        f"Neue Aktienmeldung zu {symbol}\n\n"
+        f"{title}\n\n"
+        f"Analyse:\n"
+        f"/analyse {symbol}\n\n"
+        f"Details:\n"
+        f"/details {symbol}\n\n"
+        "Hinweis: Keine Anlageberatung."
+    )
+
+
+def build_geo_alert(symbol, title):
+    return (
+        f"Neue geopolitische Meldung zu {symbol}\n\n"
+        f"{title}\n\n"
+        f"Analyse:\n"
+        f"/analyse {symbol}\n\n"
+        f"Details:\n"
+        f"/details {symbol}\n\n"
+        "Hinweis: Keine Anlageberatung."
+    )
+
+
+def check_alerts_once():
+    watchlists = load_watchlists()
+    seen = load_seen_alerts()
+    changed = False
+
+    for chat_id, symbols in watchlists.items():
+        for requested_symbol in symbols:
+            used_symbol, stock, _ = find_best_symbol(requested_symbol)
+
+            if not stock:
+                continue
+
+            profile = get_company_profile(used_symbol)
+            metrics = get_key_metrics(used_symbol)
+            company = extract_company_data(profile, metrics)
+
+            stock_news = get_stock_news(used_symbol, limit=3)
+
+            for item in stock_news:
+                title = first_available(
+                    item.get("title"),
+                    item.get("headline"),
+                )
+
+                if title == "Unbekannt":
+                    continue
+
+                alert_id = make_alert_id("fmp_news", used_symbol, title)
+
+                if alert_id not in seen:
+                    seen[alert_id] = int(time.time())
+                    changed = True
+                    send_telegram_message(
+                        chat_id,
+                        build_news_alert(requested_symbol, title),
+                    )
+
+            geo_articles = get_geopolitical_articles_with_fallback(
+                company,
+                used_symbol,
+            )
+
+            for article in geo_articles[:3]:
+                title = first_available(
+                    article.get("title"),
+                    article.get("seendate"),
+                )
+
+                if title == "Unbekannt":
+                    continue
+
+                alert_id = make_alert_id("gdelt_geo", used_symbol, title)
+
+                if alert_id not in seen:
+                    seen[alert_id] = int(time.time())
+                    changed = True
+                    send_telegram_message(
+                        chat_id,
+                        build_geo_alert(requested_symbol, title),
+                    )
+
+    if changed:
+        save_seen_alerts(seen)
+
+
+def alert_worker():
+    while True:
+        try:
+            check_alerts_once()
+
+        except Exception:
+            pass
+
+        time.sleep(ALERT_INTERVAL_SECONDS)
 
 
 async def send_text(update, text):
@@ -1245,19 +1425,21 @@ async def send_text(update, text):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "✅ Bot läuft erfolgreich auf Render!\n\n"
+        "Bot läuft erfolgreich auf Render!\n\n"
         "Nutze /help für alle Befehle."
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📈 Verfügbare Befehle:\n\n"
+        "Verfügbare Befehle:\n\n"
         "/start - Bot starten\n"
         "/analyse AAPL - kompakte Analyse\n"
         "/details AAPL - vollständige Detailanalyse\n"
-        "/analyse NVDA - kompakte Analyse\n"
-        "/details NVDA - vollständige Detailanalyse\n"
+        "/watch AAPL - Ticker beobachten\n"
+        "/unwatch AAPL - Ticker entfernen\n"
+        "/watchlist - beobachtete Ticker anzeigen\n"
+        "/alerttest - Alert-Prüfung manuell starten\n"
         "/suche SAP - Symbolsuche starten\n"
         "/info - Informationen zum Bot\n"
         "/help - Hilfe anzeigen"
@@ -1266,16 +1448,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📊 Telegram Market Signal Bot\n\n"
+        "Telegram Market Signal Bot\n\n"
         "Der Bot kann aktuell:\n"
-        "✅ kompakte Analyse mit /analyse liefern\n"
-        "✅ ausführliche Detailanalyse mit /details liefern\n"
-        "✅ Kursdaten, Fundamentaldaten und News-Sentiment auswerten\n"
-        "✅ Geopolitik-Risiko über GDELT einbeziehen\n"
-        "✅ branchenspezifischen Research-Score berechnen\n"
-        "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
-        "Nächster Ausbau:\n"
-        "Watchlist und Alerts.\n\n"
+        "- kompakte Analyse mit /analyse liefern\n"
+        "- ausführliche Detailanalyse mit /details liefern\n"
+        "- Kursdaten, Fundamentaldaten und News-Sentiment auswerten\n"
+        "- Geopolitik-Risiko über GDELT einbeziehen\n"
+        "- branchenspezifischen Research-Score berechnen\n"
+        "- Ticker mit /watch beobachten\n"
+        "- automatische News- und Geopolitik-Alerts senden\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
@@ -1292,11 +1473,11 @@ async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not results:
         await update.message.reply_text(
-            f"❌ Keine Symbole für '{query}' gefunden."
+            f"Keine Symbole für '{query}' gefunden."
         )
         return
 
-    text = f"🔎 Gefundene Symbole für '{query}':\n\n"
+    text = f"Gefundene Symbole für '{query}':\n\n"
 
     for item in results[:10]:
         symbol = item.get("symbol", "?")
@@ -1313,10 +1494,13 @@ async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         currency = first_available(item.get("currency"))
 
         text += f"{symbol} - {name}"
+
         if exchange != "Unbekannt":
             text += f" | {exchange}"
+
         if currency != "Unbekannt":
             text += f" | {currency}"
+
         text += "\n"
 
     text += "\nNutze dann z. B.:\n/analyse SYMBOL"
@@ -1358,6 +1542,88 @@ async def details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_text(update, render_detailed_analysis(data))
 
 
+async def watch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "Bitte nutze:\n/watch AAPL"
+        )
+        return
+
+    chat_id = str(update.effective_chat.id)
+    ticker = context.args[0].upper().strip()
+
+    watchlists = load_watchlists()
+    symbols = watchlists.get(chat_id, [])
+
+    if ticker not in symbols:
+        symbols.append(ticker)
+
+    watchlists[chat_id] = symbols
+    save_watchlists(watchlists)
+
+    await update.message.reply_text(
+        f"{ticker} wird jetzt beobachtet.\n\n"
+        "Du erhältst Alerts bei neuen Aktien-News oder geopolitischen Meldungen."
+    )
+
+
+async def unwatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "Bitte nutze:\n/unwatch AAPL"
+        )
+        return
+
+    chat_id = str(update.effective_chat.id)
+    ticker = context.args[0].upper().strip()
+
+    watchlists = load_watchlists()
+    symbols = watchlists.get(chat_id, [])
+
+    if ticker in symbols:
+        symbols.remove(ticker)
+
+    watchlists[chat_id] = symbols
+    save_watchlists(watchlists)
+
+    await update.message.reply_text(
+        f"{ticker} wurde aus deiner Watchlist entfernt."
+    )
+
+
+async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+
+    watchlists = load_watchlists()
+    symbols = watchlists.get(chat_id, [])
+
+    if not symbols:
+        await update.message.reply_text(
+            "Deine Watchlist ist leer.\n\n"
+            "Nutze zum Beispiel:\n/watch AAPL"
+        )
+        return
+
+    text = "Deine Watchlist:\n\n"
+
+    for symbol in symbols:
+        text += f"- {symbol}\n"
+
+    await update.message.reply_text(text)
+
+
+async def alerttest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Alert-Prüfung wird jetzt einmal ausgeführt."
+    )
+
+    check_alerts_once()
+
+    await update.message.reply_text(
+        "Alert-Prüfung abgeschlossen."
+    )
+
+
 def main():
     if not TOKEN:
         raise RuntimeError("TELEGRAM_TOKEN fehlt.")
@@ -1370,11 +1636,20 @@ def main():
         daemon=True,
     ).start()
 
+    threading.Thread(
+        target=alert_worker,
+        daemon=True,
+    ).start()
+
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analyse", analyse))
     app.add_handler(CommandHandler("details", details))
+    app.add_handler(CommandHandler("watch", watch))
+    app.add_handler(CommandHandler("unwatch", unwatch))
+    app.add_handler(CommandHandler("watchlist", watchlist))
+    app.add_handler(CommandHandler("alerttest", alerttest))
     app.add_handler(CommandHandler("suche", suche))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
