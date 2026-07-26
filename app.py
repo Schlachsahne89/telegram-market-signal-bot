@@ -95,19 +95,40 @@ def search_symbols(query):
 
     search_name_data = fmp_request("search-name", {"query": query})
     if isinstance(search_name_data, list):
-        for item in search_name_data[:5]:
+        for item in search_name_data[:10]:
             symbol = item.get("symbol")
             if symbol and symbol not in results:
                 results.append(symbol)
 
     search_symbol_data = fmp_request("search-symbol", {"query": query})
     if isinstance(search_symbol_data, list):
-        for item in search_symbol_data[:5]:
+        for item in search_symbol_data[:10]:
             symbol = item.get("symbol")
             if symbol and symbol not in results:
                 results.append(symbol)
 
     return results
+
+
+def search_symbol_details(query):
+    details = []
+
+    search_name_data = fmp_request("search-name", {"query": query})
+    if isinstance(search_name_data, list):
+        details.extend(search_name_data[:10])
+
+    search_symbol_data = fmp_request("search-symbol", {"query": query})
+    if isinstance(search_symbol_data, list):
+        existing_symbols = {
+            item.get("symbol") for item in details if item.get("symbol")
+        }
+
+        for item in search_symbol_data[:10]:
+            symbol = item.get("symbol")
+            if symbol and symbol not in existing_symbols:
+                details.append(item)
+
+    return details[:10]
 
 
 def get_stock_data(symbol):
@@ -317,6 +338,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/analyse SAP - SAP analysieren\n"
         "/analyse SAP.DE - SAP Xetra testen\n"
         "/analyse SAPGY - SAP ADR testen\n"
+        "/suche SAP - Symbolsuche starten\n"
         "/info - Informationen zum Bot\n"
         "/help - Hilfe anzeigen"
     )
@@ -341,6 +363,51 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "Bitte nutze:\n/suche SAP"
+        )
+        return
+
+    query = " ".join(context.args).strip()
+
+    results = search_symbol_details(query)
+
+    if not results:
+        await update.message.reply_text(
+            f"❌ Keine Symbole für '{query}' gefunden."
+        )
+        return
+
+    text = f"🔎 Gefundene Symbole für '{query}':\n\n"
+
+    for item in results[:10]:
+        symbol = item.get("symbol", "?")
+        name = first_available(
+            item.get("name"),
+            item.get("companyName"),
+            item.get("companyNameLong"),
+        )
+        exchange = first_available(
+            item.get("exchange"),
+            item.get("exchangeShortName"),
+            item.get("stockExchange"),
+        )
+        currency = first_available(item.get("currency"))
+
+        text += f"{symbol} - {name}"
+        if exchange != "Unbekannt":
+            text += f" | {exchange}"
+        if currency != "Unbekannt":
+            text += f" | {currency}"
+        text += "\n"
+
+    text += "\nNutze dann z. B.:\n/analyse SYMBOL"
+
+    await update.message.reply_text(text)
+
+
 async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
@@ -358,13 +425,15 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"❌ Kein Börsendatensatz für {requested_ticker} gefunden.\n\n"
             f"Geprüfte Symbole: {tried_text}\n\n"
-            "Teste zum Beispiel:\n"
+            "Nutze die Symbolsuche:\n"
+            f"/suche {requested_ticker}\n\n"
+            "Oder teste direkt:\n"
             "/analyse AAPL\n"
             "/analyse NVDA\n"
             "/analyse MSFT\n"
             "/analyse SAP.DE\n"
             "/analyse SAPGY\n\n"
-            "Hinweis: Manche deutsche Aktien werden bei FMP je nach Datenpaket nicht unter dem einfachen Kürzel gefunden."
+            "Hinweis: Manche Aktien werden bei FMP je nach Datenpaket oder Börse unter anderen Kürzeln geführt."
         )
         return
 
@@ -424,6 +493,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analyse", analyse))
+    app.add_handler(CommandHandler("suche", suche))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
 
