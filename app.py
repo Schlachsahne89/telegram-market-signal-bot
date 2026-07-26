@@ -82,7 +82,24 @@ def get_company_profile(symbol):
 
     except Exception:
         return None
+def get_key_metrics(symbol):
+    url = (
+        "https://financialmodelingprep.com/stable/key-metrics"
+        f"?symbol={symbol}"
+        f"&apikey={FMP_API_KEY}"
+    )
 
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        if not data:
+            return None
+
+        return data[0]
+
+    except Exception:
+        return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -130,6 +147,7 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stock = get_stock_data(ticker)
     profile = get_company_profile(ticker)
+    metrics = get_key_metrics(ticker)
 
     if not stock:
         await update.message.reply_text(
@@ -150,6 +168,7 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sector = "Unbekannt"
     country = "Unbekannt"
     market_cap = "Unbekannt"
+    pe_ratio = "Unbekannt"
 
     if profile:
         company_name = profile.get("companyName", "Unbekannt")
@@ -157,18 +176,21 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         country = profile.get("country", "Unbekannt")
         market_cap = format_market_cap(profile.get("marketCap", "Unbekannt"))
 
+    if metrics:
+        pe_ratio = metrics.get("peRatio", "Unbekannt")
+
     await update.message.reply_text(
         f"📈 Analyse für {ticker}\n\n"
         f"Unternehmen: {company_name}\n"
         f"Branche: {sector}\n"
         f"Land: {country}\n"
         f"Marktkapitalisierung: {market_cap}\n\n"
+        f"KGV: {pe_ratio}\n\n"
         f"Kurs: {price} USD\n"
         f"Änderung: {change}\n"
         f"Änderung %: {change_percent}%\n"
         f"Volumen: {volume}\n\n"
         "Signal: NEUTRAL\n\n"
-        "Hinweis: Keine Anlageberatung."
     )
 
 
