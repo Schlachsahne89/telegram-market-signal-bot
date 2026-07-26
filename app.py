@@ -3,6 +3,8 @@ import threading
 import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from openai import OpenAI
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -10,6 +12,9 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 PORT = int(os.getenv("PORT", 10000))
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
 
 TICKER_FALLBACKS = {
@@ -31,6 +36,7 @@ TICKER_FALLBACKS = {
     "CVX": ["CVX"],
     "JPM": ["JPM"],
     "BAC": ["BAC"],
+    "TSM": ["TSM"],
 }
 
 
@@ -59,7 +65,7 @@ def fmp_request(endpoint, params):
     request_params["apikey"] = FMP_API_KEY
 
     try:
-        response = requests.get(url, params=request_params, timeout=10)
+        response = requests.get(url, params=request_params, timeout=15)
         response.raise_for_status()
         return response.json()
     except Exception:
@@ -199,10 +205,15 @@ def get_geopolitical_news(query):
         "mode": "ArtList",
         "format": "json",
         "maxrecords": 10,
+        "timespan": "7d",
+    }
+
+    headers = {
+        "User-Agent": "TelegramMarketSignalBot/1.0"
     }
 
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=15)
         response.raise_for_status()
         data = response.json()
 
@@ -715,6 +726,8 @@ def analyze_news_sentiment(news_items):
         "raises guidance", "strong demand", "partnership",
         "approval", "buy rating", "positive", "optimistic",
         "expands", "launches",
+        "übertrifft", "stark", "steigt", "gewinnsprung",
+        "angehoben", "positive prognose", "kooperation",
     ]
 
     negative_keywords = [
@@ -723,7 +736,9 @@ def analyze_news_sentiment(news_items):
         "decline", "falls", "drops", "plunge", "loss", "losses",
         "revenue decline", "cuts guidance", "weak demand", "layoffs",
         "recall", "sell rating", "negative", "concern", "concerns",
-        "risk", "risks",
+        "risk", "risks", "verfehlt", "fällt", "gewinnwarnung",
+        "schwach", "klage", "ermittlungen", "risiko",
+        "stellenabbau", "senkt prognose",
     ]
 
     score = 0
@@ -796,100 +811,122 @@ def analyze_news_sentiment(news_items):
     }
 
 
-def build_geopolitical_query(company, used_symbol):
+def build_geopolitical_queries(company, used_symbol):
     sector = str(company.get("sector", "")).lower()
     industry = str(company.get("industry", "")).lower()
     country = str(company.get("country", "")).lower()
-    name = str(company.get("company_name", used_symbol))
+    company_name = str(company.get("company_name", used_symbol))
 
     if "technology" in sector or "semiconductor" in industry or "software" in industry:
-        risk_terms = [
-            "export controls",
-            "chip restrictions",
-            "Taiwan",
-            "China sanctions",
-            "supply chain",
-            "trade war",
+        queries = [
+            f'"{company_name}" "export controls"',
+            f'"{company_name}" "supply chain"',
+            f'{used_symbol} "China"',
+            f'{used_symbol} "Taiwan"',
+            '"semiconductor" "export controls"',
+            '"chips" "Taiwan" "China"',
+            '"AI chips" "China restrictions"',
+            '"Halbleiter" "China" "Taiwan"',
+            '"Exportkontrollen" "Halbleiter"',
         ]
 
     elif "energy" in sector or "oil" in industry or "gas" in industry:
-        risk_terms = [
-            "oil sanctions",
-            "Middle East conflict",
-            "OPEC",
-            "Russia sanctions",
-            "energy security",
-            "supply disruption",
+        queries = [
+            f'"{company_name}" "oil sanctions"',
+            f'"{company_name}" "energy security"',
+            f'{used_symbol} "Middle East"',
+            f'{used_symbol} "Russia sanctions"',
+            '"oil" "Middle East conflict"',
+            '"OPEC" "supply disruption"',
+            '"energy security" "sanctions"',
+            '"Energieversorgung" "Sanktionen"',
+            '"Öl" "Nahost"',
         ]
 
     elif "financial" in sector or "bank" in industry:
-        risk_terms = [
-            "interest rates",
-            "banking crisis",
-            "sanctions",
-            "financial stability",
-            "sovereign risk",
+        queries = [
+            f'"{company_name}" "banking risk"',
+            f'"{company_name}" "sanctions"',
+            f'{used_symbol} "financial stability"',
+            '"banking crisis" "interest rates"',
+            '"sanctions" "financial markets"',
+            '"Bankenkrise" "Zinsen"',
         ]
 
-    elif "industrials" in sector or "industrial" in industry:
-        risk_terms = [
-            "supply chain",
-            "trade war",
-            "tariffs",
-            "China",
-            "Russia sanctions",
+    elif "industrial" in sector or "industrial" in industry:
+        queries = [
+            f'"{company_name}" "supply chain"',
+            f'"{company_name}" "tariffs"',
+            f'{used_symbol} "China"',
+            '"trade war" "supply chain"',
+            '"tariffs" "industrial companies"',
+            '"Lieferkette" "Zölle"',
         ]
 
     elif "health" in sector or "pharma" in industry or "biotech" in industry:
-        risk_terms = [
-            "drug regulation",
-            "health policy",
-            "patent dispute",
-            "supply chain",
-            "China",
+        queries = [
+            f'"{company_name}" "drug regulation"',
+            f'"{company_name}" "supply chain"',
+            f'{used_symbol} "health policy"',
+            '"pharma" "regulation"',
+            '"biotech" "geopolitical risk"',
+            '"Pharma" "Regulierung"',
         ]
 
     else:
-        risk_terms = [
-            "geopolitical risk",
-            "sanctions",
-            "trade war",
-            "supply chain",
-            "conflict",
+        queries = [
+            f'"{company_name}" "geopolitical risk"',
+            f'"{company_name}" "sanctions"',
+            f'{used_symbol} "supply chain"',
+            '"geopolitical risk" "stocks"',
+            '"sanctions" "global markets"',
+            '"Sanktionen" "Aktienmärkte"',
         ]
 
-    query = f'"{name}" OR {used_symbol} ' + " OR ".join(risk_terms)
-
     if country and country not in ["unbekannt", "unknown"]:
-        query = query + f" OR {country}"
+        queries.append(f'"{company_name}" "{country}" "political risk"')
 
-    return query
+    return queries
+
+
+def get_geopolitical_articles_with_fallback(company, used_symbol):
+    queries = build_geopolitical_queries(company, used_symbol)
+
+    all_articles = []
+    seen_titles = set()
+
+    for query in queries:
+        articles = get_geopolitical_news(query)
+
+        for article in articles:
+            title = article.get("title")
+
+            if title and title not in seen_titles:
+                all_articles.append(article)
+                seen_titles.add(title)
+
+        if len(all_articles) >= 5:
+            break
+
+    return all_articles[:10]
 
 
 def analyze_geopolitical_risk(articles):
     high_risk_keywords = [
-        "war",
-        "invasion",
-        "sanctions",
-        "export controls",
-        "military",
-        "blockade",
-        "conflict",
-        "tariffs",
-        "trade war",
-        "supply disruption",
-        "escalation",
+        "war", "invasion", "sanctions", "export controls",
+        "military", "blockade", "conflict", "tariffs",
+        "trade war", "supply disruption", "escalation",
+        "krieg", "invasion", "sanktionen", "exportkontrollen",
+        "militär", "blockade", "konflikt", "zölle",
+        "handelskrieg", "lieferkettenstörung", "eskalation",
     ]
 
     medium_risk_keywords = [
-        "tensions",
-        "restrictions",
-        "regulation",
-        "probe",
-        "investigation",
-        "political risk",
-        "supply chain",
-        "uncertainty",
+        "tensions", "restrictions", "regulation", "probe",
+        "investigation", "political risk", "supply chain",
+        "uncertainty", "spannungen", "beschränkungen",
+        "regulierung", "ermittlung", "politisches risiko",
+        "lieferkette", "unsicherheit",
     ]
 
     score = 50
@@ -1057,6 +1094,118 @@ def calculate_professional_research_score(
     }
 
 
+def build_ai_prompt(data):
+    company = data["company"]
+    research = data["research"]
+    news = data["news_sentiment"]
+    geo = data["geopolitical_risk"]
+
+    headlines = news.get("headlines", [])
+    geo_headlines = geo.get("headlines", [])
+
+    news_text = "\n".join([f"- {headline}" for headline in headlines]) if headlines else "Keine aktuellen Aktien-News verfügbar."
+    geo_text = "\n".join([f"- {headline}" for headline in geo_headlines]) if geo_headlines else "Keine geopolitischen Headlines verfügbar."
+
+    prompt = f"""
+Du bist ein vorsichtiger deutschsprachiger Finanz-Research-Assistent.
+
+Wichtig:
+- Keine Anlageberatung geben.
+- Keine sicheren Kauf- oder Verkaufsempfehlungen formulieren.
+- Nur die gelieferten Daten verwenden.
+- Wenn Daten fehlen, klar darauf hinweisen.
+- Kurz, präzise und verständlich schreiben.
+- Ausgabe auf Deutsch.
+
+Analysiere folgende Aktie:
+
+Ticker: {data["requested_ticker"]}
+Verwendetes Symbol: {data["used_symbol"]}
+
+Unternehmen:
+Name: {company["company_name"]}
+Branche: {company["sector"]}
+Industrie: {company["industry"]}
+Land: {company["country"]}
+Marktkapitalisierung: {format_market_cap(company["market_cap"])}
+
+Fundamentaldaten:
+KGV: {format_number(data["pe_ratio"])}
+ROE: {format_percent(data["roe"])}
+Debt/Equity: {format_number(data["debt_to_equity"])}
+Umsatzwachstum: {format_percent(data["revenue_growth"])}
+Gewinnwachstum: {format_percent(data["net_income_growth"])}
+Free-Cashflow-Wachstum: {format_percent(data["free_cash_flow_growth"])}
+EPS-Wachstum: {format_percent(data["eps_growth"])}
+
+Marktdaten:
+Kurs: {format_number(data["price"])} USD
+Tagesänderung: {format_percent(data["change_percent"])}
+Volumen: {data["volume"]}
+
+News:
+News-Sentiment: {news["sentiment"]}
+News-Score: {news["score"]}
+Headlines:
+{news_text}
+
+Geopolitik:
+Risiko-Level: {geo["risk_level"]}
+Geopolitik-Score: {geo["score"]} / 100
+Risikobegriffe: {", ".join(geo["risk_terms"]) if geo["risk_terms"] else "Keine auffälligen Begriffe"}
+Geopolitische Headlines:
+{geo_text}
+
+Quantitativer Research-Score:
+Sektorprofil: {research["sector_profile"]}
+Datenqualität: {research["data_quality"]}
+Score: {research["score"]} / 100
+Signal: {research["signal"]}
+
+Aufgabe:
+Erstelle ein kurzes KI-Fazit mit:
+1. Gesamtbild
+2. wichtigste positive Faktoren
+3. wichtigste Risikofaktoren
+4. Einordnung des Signals
+5. Hinweis, dass es keine Anlageberatung ist
+
+Maximal 7 Bulletpoints.
+"""
+    return prompt.strip()
+
+
+def generate_ai_summary(data):
+    if not OPENAI_API_KEY:
+        return (
+            "KI-Fazit: Nicht aktiv.\n"
+            "Grund: OPENAI_API_KEY ist nicht in Render gesetzt."
+        )
+
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            instructions=(
+                "Du bist ein vorsichtiger deutschsprachiger Finanz-Research-Assistent. "
+                "Du gibst keine Anlageberatung, sondern nur strukturierte Research-Hinweise."
+            ),
+            input=build_ai_prompt(data),
+            max_output_tokens=600,
+        )
+
+        text = response.output_text.strip()
+
+        if not text:
+            return "KI-Fazit: Keine verwertbare KI-Antwort erhalten."
+
+        return text
+
+    except Exception as exc:
+        return f"KI-Fazit konnte nicht erstellt werden: {exc}"
+
+
 def build_analysis(requested_ticker):
     used_symbol, stock, tried_symbols = find_best_symbol(requested_ticker)
 
@@ -1077,8 +1226,7 @@ def build_analysis(requested_ticker):
     company = extract_company_data(profile, metrics)
     growth_data = extract_growth_data(growth)
 
-    geopolitical_query = build_geopolitical_query(company, used_symbol)
-    geopolitical_articles = get_geopolitical_news(geopolitical_query)
+    geopolitical_articles = get_geopolitical_articles_with_fallback(company, used_symbol)
     geopolitical_risk = analyze_geopolitical_risk(geopolitical_articles)
 
     price = stock.get("price", "Unbekannt")
@@ -1110,7 +1258,7 @@ def build_analysis(requested_ticker):
         geopolitical_score=geopolitical_risk["score"],
     )
 
-    return {
+    result = {
         "found": True,
         "requested_ticker": requested_ticker,
         "used_symbol": used_symbol,
@@ -1130,6 +1278,10 @@ def build_analysis(requested_ticker):
         "geopolitical_risk": geopolitical_risk,
         "research": research,
     }
+
+    result["ai_summary"] = generate_ai_summary(result)
+
+    return result
 
 
 def render_not_found(data):
@@ -1178,6 +1330,8 @@ def render_compact_analysis(data):
         f"Änderung: {format_percent(data['change_percent'])}\n\n"
         f"Top-Gründe:\n"
         f"{top_reasons}\n"
+        f"🤖 KI-Fazit:\n"
+        f"{data['ai_summary']}\n\n"
         f"Für Details:\n"
         f"/details {data['requested_ticker']}\n\n"
         "Hinweis: Keine Anlageberatung."
@@ -1265,6 +1419,8 @@ def render_detailed_analysis(data):
         f"{factor_text}\n"
         f"Gründe:\n"
         f"{notes_text}\n"
+        f"🤖 KI-Fazit:\n"
+        f"{data['ai_summary']}\n\n"
         "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
     )
 
@@ -1304,9 +1460,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📈 Verfügbare Befehle:\n\n"
         "/start - Bot starten\n"
-        "/analyse AAPL - kompakte Analyse\n"
+        "/analyse AAPL - kompakte Analyse mit KI-Fazit\n"
         "/details AAPL - vollständige Detailanalyse\n"
-        "/analyse NVDA - kompakte Analyse\n"
+        "/analyse NVDA - kompakte Analyse mit KI-Fazit\n"
         "/details NVDA - vollständige Detailanalyse\n"
         "/suche SAP - Symbolsuche starten\n"
         "/info - Informationen zum Bot\n"
@@ -1323,9 +1479,10 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Kursdaten, Fundamentaldaten und News-Sentiment auswerten\n"
         "✅ Geopolitik-Risiko über GDELT einbeziehen\n"
         "✅ branchenspezifischen Research-Score berechnen\n"
+        "✅ KI-Fazit aus FMP + GDELT + News erzeugen\n"
         "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
         "Nächster Ausbau:\n"
-        "ETF-Daten und KI-Zusammenfassung.\n\n"
+        "ETF-Daten, Watchlist und Alerts.\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
