@@ -13,13 +13,20 @@ PORT = int(os.getenv("PORT", 10000))
 
 
 TICKER_FALLBACKS = {
-    "SAP": ["SAP", "SAP.DE", "SAPGY"],
-    "BMW": ["BMW.DE", "BMWYY"],
-    "VOW": ["VOW.DE", "VWAGY"],
-    "BAS": ["BAS.DE", "BASFY"],
-    "SIE": ["SIE.DE", "SIEGY"],
-    "ALV": ["ALV.DE", "ALIZY"],
-    "DTE": ["DTE.DE", "DTEGY"],
+    "SAP": ["SAP.DE", "SAPGY", "SAP"],
+    "BMW": ["BMW.DE", "BMWYY", "BMW"],
+    "VOW": ["VOW.DE", "VWAGY", "VOW"],
+    "BAS": ["BAS.DE", "BASFY", "BAS"],
+    "SIE": ["SIE.DE", "SIEGY", "SIE"],
+    "ALV": ["ALV.DE", "ALIZY", "ALV"],
+    "DTE": ["DTE.DE", "DTEGY", "DTE"],
+    "AAPL": ["AAPL"],
+    "NVDA": ["NVDA"],
+    "MSFT": ["MSFT"],
+    "AMZN": ["AMZN"],
+    "GOOGL": ["GOOGL", "GOOG"],
+    "META": ["META"],
+    "TSLA": ["TSLA"],
 }
 
 
@@ -29,13 +36,16 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is running")
 
+    def log_message(self, format, *args):
+        return
+
 
 def start_webserver():
     server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
     server.serve_forever()
 
 
-def fmp_get(endpoint, params):
+def fmp_request(endpoint, params):
     if not FMP_API_KEY:
         return None
 
@@ -47,32 +57,57 @@ def fmp_get(endpoint, params):
     try:
         response = requests.get(url, params=request_params, timeout=10)
         response.raise_for_status()
-        data = response.json()
-
-        if not data:
-            return None
-
-        if isinstance(data, list):
-            if len(data) == 0:
-                return None
-            return data[0]
-
-        if isinstance(data, dict):
-            return data
-
-        return None
-
+        return response.json()
     except Exception:
         return None
 
 
-def get_possible_symbols(symbol):
-    symbol = symbol.upper().strip()
+def first_item(data):
+    if not data:
+        return None
+
+    if isinstance(data, list):
+        if len(data) == 0:
+            return None
+        return data[0]
+
+    if isinstance(data, dict):
+        return data
+
+    return None
+
+
+def fmp_get(endpoint, params):
+    return first_item(fmp_request(endpoint, params))
+
+
+def get_possible_symbols(user_input):
+    symbol = user_input.upper().strip()
 
     if symbol in TICKER_FALLBACKS:
         return TICKER_FALLBACKS[symbol]
 
     return [symbol]
+
+
+def search_symbols(query):
+    results = []
+
+    search_name_data = fmp_request("search-name", {"query": query})
+    if isinstance(search_name_data, list):
+        for item in search_name_data[:5]:
+            symbol = item.get("symbol")
+            if symbol and symbol not in results:
+                results.append(symbol)
+
+    search_symbol_data = fmp_request("search-symbol", {"query": query})
+    if isinstance(search_symbol_data, list):
+        for item in search_symbol_data[:5]:
+            symbol = item.get("symbol")
+            if symbol and symbol not in results:
+                results.append(symbol)
+
+    return results
 
 
 def get_stock_data(symbol):
@@ -89,8 +124,8 @@ def get_key_metrics(symbol):
         {
             "symbol": symbol,
             "period": "annual",
-            "limit": 1
-        }
+            "limit": 1,
+        },
     )
 
 
@@ -100,21 +135,34 @@ def get_ratios(symbol):
         {
             "symbol": symbol,
             "period": "annual",
-            "limit": 1
-        }
+            "limit": 1,
+        },
     )
 
 
-def find_best_symbol(user_symbol):
-    possible_symbols = get_possible_symbols(user_symbol)
+def find_best_symbol(user_input):
+    requested = user_input.upper().strip()
 
-    for symbol in possible_symbols:
+    candidates = get_possible_symbols(requested)
+
+    searched_symbols = search_symbols(requested)
+    for symbol in searched_symbols:
+        if symbol not in candidates:
+            candidates.append(symbol)
+
+    for symbol in candidates:
         stock = get_stock_data(symbol)
-
         if stock:
-            return symbol, stock
+            return symbol, stock, candidates
 
-    return user_symbol.upper(), None
+    return requested, None, candidates
+
+
+def first_available(*values):
+    for value in values:
+        if value is not None and value != "" and value != 0 and value != "Unbekannt":
+            return value
+    return "Unbekannt"
 
 
 def format_market_cap(value):
@@ -164,29 +212,38 @@ def calculate_pe_ratio(stock, metrics, ratios):
     possible_values = []
 
     if stock:
-        possible_values.append(stock.get("pe"))
-        possible_values.append(stock.get("peRatio"))
+        possible_values.extend(
+            [
+                stock.get("pe"),
+                stock.get("peRatio"),
+                stock.get("priceEarningsRatio"),
+            ]
+        )
 
     if metrics:
-        possible_values.append(metrics.get("peRatio"))
-        possible_values.append(metrics.get("priceEarningsRatio"))
-        possible_values.append(metrics.get("priceToEarningsRatio"))
+        possible_values.extend(
+            [
+                metrics.get("peRatio"),
+                metrics.get("priceEarningsRatio"),
+                metrics.get("priceToEarningsRatio"),
+            ]
+        )
 
     if ratios:
-        possible_values.append(ratios.get("peRatio"))
-        possible_values.append(ratios.get("priceEarningsRatio"))
-        possible_values.append(ratios.get("priceToEarningsRatio"))
+        possible_values.extend(
+            [
+                ratios.get("peRatio"),
+                ratios.get("priceEarningsRatio"),
+                ratios.get("priceToEarningsRatio"),
+            ]
+        )
 
     for value in possible_values:
         if value is not None and value != "" and value != 0:
             return format_number(value)
 
-    price = None
-    eps = None
-
-    if stock:
-        price = stock.get("price")
-        eps = stock.get("eps")
+    price = stock.get("price") if stock else None
+    eps = stock.get("eps") if stock else None
 
     try:
         if price and eps and float(eps) != 0:
@@ -206,14 +263,18 @@ def extract_company_data(profile, metrics):
     market_cap = "Unbekannt"
 
     if profile:
-        company_name = profile.get("companyName", "Unbekannt")
-        sector = profile.get("sector", "Unbekannt")
-        industry = profile.get("industry", "Unbekannt")
-        country = profile.get("country", "Unbekannt")
-        market_cap = profile.get("marketCap", "Unbekannt")
+        company_name = first_available(
+            profile.get("companyName"),
+            profile.get("companyNameLong"),
+            profile.get("name"),
+        )
+        sector = first_available(profile.get("sector"))
+        industry = first_available(profile.get("industry"))
+        country = first_available(profile.get("country"))
+        market_cap = first_available(profile.get("marketCap"))
 
     if market_cap == "Unbekannt" and metrics:
-        market_cap = metrics.get("marketCap", "Unbekannt")
+        market_cap = first_available(metrics.get("marketCap"))
 
     return {
         "company_name": company_name,
@@ -250,10 +311,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📈 Verfügbare Befehle:\n\n"
         "/start - Bot starten\n"
-        "/analyse AAPL - Aktie analysieren\n"
-        "/analyse NVDA - Aktie analysieren\n"
-        "/analyse MSFT - Aktie analysieren\n"
-        "/analyse SAP - Aktie analysieren, inklusive Fallbacks\n"
+        "/analyse AAPL - Apple analysieren\n"
+        "/analyse NVDA - Nvidia analysieren\n"
+        "/analyse MSFT - Microsoft analysieren\n"
+        "/analyse SAP - SAP analysieren\n"
+        "/analyse SAP.DE - SAP Xetra testen\n"
+        "/analyse SAPGY - SAP ADR testen\n"
         "/info - Informationen zum Bot\n"
         "/help - Hilfe anzeigen"
     )
@@ -270,7 +333,8 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Unternehmensdaten anzeigen\n"
         "✅ Branche, Industrie, Land und Marktkapitalisierung anzeigen\n"
         "✅ KGV mit mehreren Fallbacks anzeigen\n"
-        "✅ einfache Momentum-Einschätzung anzeigen\n\n"
+        "✅ einfache Momentum-Einschätzung anzeigen\n"
+        "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
         "Nächster Ausbau:\n"
         "Fundamentalanalyse, News, Geopolitik und Long/Short-Signale.\n\n"
         "Hinweis: Keine Anlageberatung."
@@ -286,16 +350,23 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     requested_ticker = context.args[0].upper().strip()
 
-    used_symbol, stock = find_best_symbol(requested_ticker)
+    used_symbol, stock, tried_symbols = find_best_symbol(requested_ticker)
 
     if not stock:
-    await update.message.reply_text(
-        f"❌ Kein Börsendatensatz für {requested_ticker} gefunden.\n"
-        f"Teste einmal:\n"
-        f"/analyse SAP.DE\n"
-        f"/analyse SAPGY"
-    )
-    return
+        tried_text = ", ".join(tried_symbols) if tried_symbols else requested_ticker
+
+        await update.message.reply_text(
+            f"❌ Kein Börsendatensatz für {requested_ticker} gefunden.\n\n"
+            f"Geprüfte Symbole: {tried_text}\n\n"
+            "Teste zum Beispiel:\n"
+            "/analyse AAPL\n"
+            "/analyse NVDA\n"
+            "/analyse MSFT\n"
+            "/analyse SAP.DE\n"
+            "/analyse SAPGY\n\n"
+            "Hinweis: Manche deutsche Aktien werden bei FMP je nach Datenpaket nicht unter dem einfachen Kürzel gefunden."
+        )
+        return
 
     profile = get_company_profile(used_symbol)
     metrics = get_key_metrics(used_symbol)
@@ -305,19 +376,22 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     price = stock.get("price", "Unbekannt")
     change = stock.get("change", "Unbekannt")
-    change_percent = stock.get("changePercentage", "Unbekannt")
+    change_percent = first_available(
+        stock.get("changePercentage"),
+        stock.get("changesPercentage"),
+    )
     volume = stock.get("volume", "Unbekannt")
-    pe_ratio = calculate_pe_ratio(stock, metrics, ratios)
 
+    pe_ratio = calculate_pe_ratio(stock, metrics, ratios)
     momentum_note = basic_research_note(change_percent)
 
     used_symbol_note = ""
     if used_symbol != requested_ticker:
-        used_symbol_note = f"\nVerwendetes FMP-Symbol: {used_symbol}\n"
+        used_symbol_note = f"Verwendetes FMP-Symbol: {used_symbol}\n\n"
 
     await update.message.reply_text(
-        f"📈 Analyse für {requested_ticker}\n"
-        f"{used_symbol_note}\n"
+        f"📈 Analyse für {requested_ticker}\n\n"
+        f"{used_symbol_note}"
         f"Unternehmen: {company['company_name']}\n"
         f"Branche: {company['sector']}\n"
         f"Industrie: {company['industry']}\n"
@@ -343,7 +417,7 @@ def main():
 
     threading.Thread(
         target=start_webserver,
-        daemon=True
+        daemon=True,
     ).start()
 
     app = Application.builder().token(TOKEN).build()
@@ -354,7 +428,7 @@ def main():
     app.add_handler(CommandHandler("info", info))
 
     print("Bot gestartet")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
