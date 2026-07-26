@@ -217,6 +217,68 @@ def get_possible_symbols(user_input):
     return [symbol]
 
 
+def get_symbol_name(item):
+    return first_available(
+        item.get("name"),
+        item.get("companyName"),
+        item.get("companyNameLong"),
+    )
+
+
+def get_symbol_exchange(item):
+    return first_available(
+        item.get("exchange"),
+        item.get("exchangeShortName"),
+        item.get("stockExchange"),
+    )
+
+
+def get_symbol_currency(item):
+    return first_available(
+        item.get("currency"),
+    )
+
+
+def get_symbol_type(item):
+    return first_available(
+        item.get("type"),
+        item.get("securityType"),
+    )
+
+
+def score_symbol_result(item, query):
+    query_text = str(query).lower().strip()
+
+    symbol = str(item.get("symbol", "")).lower().strip()
+    name = str(get_symbol_name(item)).lower().strip()
+    exchange = str(get_symbol_exchange(item)).lower().strip()
+
+    score = 0
+
+    if symbol == query_text:
+        score += 100
+
+    if symbol.startswith(query_text):
+        score += 60
+
+    if query_text in symbol:
+        score += 30
+
+    if name == query_text:
+        score += 80
+
+    if name.startswith(query_text):
+        score += 50
+
+    if query_text in name:
+        score += 25
+
+    if exchange in ["nasdaq", "nyse", "xetra", "lse", "tsx", "tokyo", "hkse"]:
+        score += 5
+
+    return score
+
+
 def search_symbols(query):
     results = []
 
@@ -242,29 +304,51 @@ def search_symbols(query):
 
 
 def search_symbol_details(query):
-    details = []
+    raw_results = []
 
-    data_name = fmp_request("search-name", {"query": query})
+    search_name_data = fmp_request(
+        "search-name",
+        {
+            "query": query,
+        },
+    )
 
-    if isinstance(data_name, list):
-        details.extend(data_name[:10])
+    if isinstance(search_name_data, list):
+        raw_results.extend(search_name_data[:20])
 
-    data_symbol = fmp_request("search-symbol", {"query": query})
+    search_symbol_data = fmp_request(
+        "search-symbol",
+        {
+            "query": query,
+        },
+    )
 
-    if isinstance(data_symbol, list):
-        existing = {
-            item.get("symbol")
-            for item in details
-            if item.get("symbol")
-        }
+    if isinstance(search_symbol_data, list):
+        raw_results.extend(search_symbol_data[:20])
 
-        for item in data_symbol[:10]:
-            symbol = item.get("symbol")
+    results = []
+    seen_symbols = set()
 
-            if symbol and symbol not in existing:
-                details.append(item)
+    for item in raw_results:
+        symbol = item.get("symbol")
 
-    return details[:10]
+        if not symbol:
+            continue
+
+        symbol_key = str(symbol).upper().strip()
+
+        if symbol_key in seen_symbols:
+            continue
+
+        seen_symbols.add(symbol_key)
+        results.append(item)
+
+    results.sort(
+        key=lambda item: score_symbol_result(item, query),
+        reverse=True,
+    )
+
+    return results[:15]
 
 
 def find_best_symbol(user_input):
@@ -731,24 +815,73 @@ def score_momentum(change_percent):
 
 def analyze_news_sentiment(news_items):
     positive_keywords = [
-        "beat", "beats", "upgrade", "upgraded", "outperform",
-        "bullish", "growth", "record", "strong", "surge",
-        "rally", "profit", "profits", "raises guidance",
-        "strong demand", "partnership", "approval", "buy rating",
-        "positive", "optimistic", "expands", "launches",
-        "übertrifft", "stark", "steigt", "gewinnsprung",
-        "angehoben", "positive prognose", "kooperation",
+        "beat",
+        "beats",
+        "upgrade",
+        "upgraded",
+        "outperform",
+        "bullish",
+        "growth",
+        "record",
+        "strong",
+        "surge",
+        "rally",
+        "profit",
+        "profits",
+        "raises guidance",
+        "strong demand",
+        "partnership",
+        "approval",
+        "buy rating",
+        "positive",
+        "optimistic",
+        "expands",
+        "launches",
+        "übertrifft",
+        "stark",
+        "steigt",
+        "gewinnsprung",
+        "angehoben",
+        "positive prognose",
+        "kooperation",
     ]
 
     negative_keywords = [
-        "miss", "misses", "downgrade", "downgraded", "underperform",
-        "bearish", "lawsuit", "probe", "investigation", "weak",
-        "decline", "falls", "drops", "plunge", "loss", "losses",
-        "cuts guidance", "weak demand", "layoffs", "recall",
-        "sell rating", "negative", "concern", "concerns",
-        "risk", "risks", "verfehlt", "fällt", "gewinnwarnung",
-        "schwach", "klage", "ermittlungen", "risiko",
-        "stellenabbau", "senkt prognose",
+        "miss",
+        "misses",
+        "downgrade",
+        "downgraded",
+        "underperform",
+        "bearish",
+        "lawsuit",
+        "probe",
+        "investigation",
+        "weak",
+        "decline",
+        "falls",
+        "drops",
+        "plunge",
+        "loss",
+        "losses",
+        "cuts guidance",
+        "weak demand",
+        "layoffs",
+        "recall",
+        "sell rating",
+        "negative",
+        "concern",
+        "concerns",
+        "risk",
+        "risks",
+        "verfehlt",
+        "fällt",
+        "gewinnwarnung",
+        "schwach",
+        "klage",
+        "ermittlungen",
+        "risiko",
+        "stellenabbau",
+        "senkt prognose",
     ]
 
     score = 0
@@ -867,20 +1000,44 @@ def get_geopolitical_articles_with_fallback(company, used_symbol):
 
 def analyze_geopolitical_risk(articles):
     high_keywords = [
-        "war", "invasion", "sanctions", "export controls",
-        "military", "blockade", "conflict", "tariffs",
-        "trade war", "supply disruption", "escalation",
-        "krieg", "sanktionen", "exportkontrollen",
-        "militär", "konflikt", "zölle", "handelskrieg",
-        "lieferkettenstörung", "eskalation",
+        "war",
+        "invasion",
+        "sanctions",
+        "export controls",
+        "military",
+        "blockade",
+        "conflict",
+        "tariffs",
+        "trade war",
+        "supply disruption",
+        "escalation",
+        "krieg",
+        "sanktionen",
+        "exportkontrollen",
+        "militär",
+        "konflikt",
+        "zölle",
+        "handelskrieg",
+        "lieferkettenstörung",
+        "eskalation",
     ]
 
     medium_keywords = [
-        "tensions", "restrictions", "regulation", "probe",
-        "investigation", "political risk", "supply chain",
-        "uncertainty", "spannungen", "beschränkungen",
-        "regulierung", "ermittlung", "politisches risiko",
-        "lieferkette", "unsicherheit",
+        "tensions",
+        "restrictions",
+        "regulation",
+        "probe",
+        "investigation",
+        "political risk",
+        "supply chain",
+        "uncertainty",
+        "spannungen",
+        "beschränkungen",
+        "regulierung",
+        "ermittlung",
+        "politisches risiko",
+        "lieferkette",
+        "unsicherheit",
     ]
 
     score = 50
@@ -1399,6 +1556,37 @@ def alert_worker():
         time.sleep(ALERT_INTERVAL_SECONDS)
 
 
+def format_symbol_search_result(index, item):
+    symbol = first_available(
+        item.get("symbol"),
+    )
+
+    name = get_symbol_name(item)
+    exchange = get_symbol_exchange(item)
+    currency = get_symbol_currency(item)
+    result_type = get_symbol_type(item)
+
+    details = []
+
+    if exchange != "Unbekannt":
+        details.append(f"Boerse: {exchange}")
+
+    if currency != "Unbekannt":
+        details.append(f"Waehrung: {currency}")
+
+    if result_type != "Unbekannt":
+        details.append(f"Typ: {result_type}")
+
+    text = f"{index}. {symbol} - {name}\n"
+
+    if details:
+        text += f"   {' | '.join(details)}\n"
+
+    text += f"   Analyse: /analyse {symbol}\n"
+
+    return text
+
+
 async def send_text(update, text):
     max_length = 3900
 
@@ -1440,7 +1628,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unwatch AAPL - Ticker entfernen\n"
         "/watchlist - beobachtete Ticker anzeigen\n"
         "/alerttest - Alert-Prüfung manuell starten\n"
-        "/suche SAP - Symbolsuche starten\n"
+        "/suche Toyota - Symbol weltweit suchen\n"
         "/info - Informationen zum Bot\n"
         "/help - Hilfe anzeigen"
     )
@@ -1456,7 +1644,8 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- Geopolitik-Risiko über GDELT einbeziehen\n"
         "- branchenspezifischen Research-Score berechnen\n"
         "- Ticker mit /watch beobachten\n"
-        "- automatische News- und Geopolitik-Alerts senden\n\n"
+        "- automatische News- und Geopolitik-Alerts senden\n"
+        "- globale Symbolsuche mit /suche nutzen\n\n"
         "Hinweis: Keine Anlageberatung."
     )
 
@@ -1464,7 +1653,13 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            "Bitte nutze:\n/suche SAP"
+            "Bitte nutze:\n"
+            "/suche SAP\n\n"
+            "Beispiele:\n"
+            "/suche Toyota\n"
+            "/suche Samsung\n"
+            "/suche Shell\n"
+            "/suche Nvidia"
         )
         return
 
@@ -1473,39 +1668,27 @@ async def suche(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not results:
         await update.message.reply_text(
-            f"Keine Symbole für '{query}' gefunden."
+            f"Keine Symbole für '{query}' gefunden.\n\n"
+            "Tipps:\n"
+            "- Suche nach dem Unternehmensnamen, z. B. /suche Toyota\n"
+            "- Suche nach dem bekannten Ticker, z. B. /suche AAPL\n"
+            "- Bei Auslandsaktien ist oft ein Boersen-Suffix noetig, z. B. .DE, .T, .HK oder .L"
         )
         return
 
-    text = f"Gefundene Symbole für '{query}':\n\n"
+    text = f"Suchergebnisse für '{query}':\n\n"
 
-    for item in results[:10]:
-        symbol = item.get("symbol", "?")
-        name = first_available(
-            item.get("name"),
-            item.get("companyName"),
-            item.get("companyNameLong"),
-        )
-        exchange = first_available(
-            item.get("exchange"),
-            item.get("exchangeShortName"),
-            item.get("stockExchange"),
-        )
-        currency = first_available(item.get("currency"))
-
-        text += f"{symbol} - {name}"
-
-        if exchange != "Unbekannt":
-            text += f" | {exchange}"
-
-        if currency != "Unbekannt":
-            text += f" | {currency}"
-
+    for index, item in enumerate(results[:10], start=1):
+        text += format_symbol_search_result(index, item)
         text += "\n"
 
-    text += "\nNutze dann z. B.:\n/analyse SYMBOL"
+    text += (
+        "Tipp:\n"
+        "Kopiere das passende Symbol exakt in /analyse.\n"
+        "Beispiel: /analyse 7203.T"
+    )
 
-    await update.message.reply_text(text)
+    await send_text(update, text)
 
 
 async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
