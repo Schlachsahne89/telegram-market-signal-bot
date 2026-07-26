@@ -673,59 +673,21 @@ def score_momentum(change_percent):
 
 def analyze_news_sentiment(news_items):
     positive_keywords = [
-        "beat",
-        "beats",
-        "upgrade",
-        "upgraded",
-        "outperform",
-        "bullish",
-        "growth",
-        "record",
-        "strong",
-        "surge",
-        "rally",
-        "profit",
-        "profits",
-        "revenue growth",
-        "raises guidance",
-        "strong demand",
-        "partnership",
-        "approval",
-        "buy rating",
-        "positive",
-        "optimistic",
-        "expands",
-        "launches",
+        "beat", "beats", "upgrade", "upgraded", "outperform",
+        "bullish", "growth", "record", "strong", "surge",
+        "rally", "profit", "profits", "revenue growth",
+        "raises guidance", "strong demand", "partnership",
+        "approval", "buy rating", "positive", "optimistic",
+        "expands", "launches",
     ]
 
     negative_keywords = [
-        "miss",
-        "misses",
-        "downgrade",
-        "downgraded",
-        "underperform",
-        "bearish",
-        "lawsuit",
-        "probe",
-        "investigation",
-        "weak",
-        "decline",
-        "falls",
-        "drops",
-        "plunge",
-        "loss",
-        "losses",
-        "revenue decline",
-        "cuts guidance",
-        "weak demand",
-        "layoffs",
-        "recall",
-        "sell rating",
-        "negative",
-        "concern",
-        "concerns",
-        "risk",
-        "risks",
+        "miss", "misses", "downgrade", "downgraded", "underperform",
+        "bearish", "lawsuit", "probe", "investigation", "weak",
+        "decline", "falls", "drops", "plunge", "loss", "losses",
+        "revenue decline", "cuts guidance", "weak demand", "layoffs",
+        "recall", "sell rating", "negative", "concern", "concerns",
+        "risk", "risks",
     ]
 
     score = 0
@@ -769,6 +731,7 @@ def analyze_news_sentiment(news_items):
             item_score -= 1
 
         api_sentiment_number = to_float(api_sentiment)
+
         if api_sentiment_number is not None:
             if api_sentiment_number >= 0.25:
                 item_score += 1
@@ -893,6 +856,217 @@ def calculate_professional_research_score(
     }
 
 
+def build_analysis(requested_ticker):
+    used_symbol, stock, tried_symbols = find_best_symbol(requested_ticker)
+
+    if not stock:
+        return {
+            "found": False,
+            "requested_ticker": requested_ticker,
+            "tried_symbols": tried_symbols,
+        }
+
+    profile = get_company_profile(used_symbol)
+    metrics = get_key_metrics(used_symbol)
+    ratios = get_ratios(used_symbol)
+    growth = get_financial_growth(used_symbol)
+    news_items = get_stock_news(used_symbol)
+    news_sentiment = analyze_news_sentiment(news_items)
+
+    company = extract_company_data(profile, metrics)
+    growth_data = extract_growth_data(growth)
+
+    price = stock.get("price", "Unbekannt")
+    change = stock.get("change", "Unbekannt")
+    change_percent = first_available(
+        stock.get("changePercentage"),
+        stock.get("changesPercentage"),
+    )
+    volume = stock.get("volume", "Unbekannt")
+
+    pe_ratio = calculate_pe_ratio(stock, metrics, ratios)
+    roe = calculate_roe(metrics, ratios)
+    debt_to_equity = calculate_debt_to_equity(ratios, metrics)
+
+    revenue_growth = growth_data["revenue_growth"]
+    net_income_growth = growth_data["net_income_growth"]
+    free_cash_flow_growth = growth_data["free_cash_flow_growth"]
+    eps_growth = growth_data["eps_growth"]
+
+    research = calculate_professional_research_score(
+        company=company,
+        change_percent=change_percent,
+        pe_ratio=pe_ratio,
+        roe=roe,
+        revenue_growth=revenue_growth,
+        net_income_growth=net_income_growth,
+        debt_to_equity=debt_to_equity,
+        news_score=news_sentiment["score"],
+    )
+
+    return {
+        "found": True,
+        "requested_ticker": requested_ticker,
+        "used_symbol": used_symbol,
+        "company": company,
+        "price": price,
+        "change": change,
+        "change_percent": change_percent,
+        "volume": volume,
+        "pe_ratio": pe_ratio,
+        "roe": roe,
+        "debt_to_equity": debt_to_equity,
+        "revenue_growth": revenue_growth,
+        "net_income_growth": net_income_growth,
+        "free_cash_flow_growth": free_cash_flow_growth,
+        "eps_growth": eps_growth,
+        "news_sentiment": news_sentiment,
+        "research": research,
+    }
+
+
+def render_not_found(data):
+    requested_ticker = data["requested_ticker"]
+    tried_symbols = data.get("tried_symbols", [])
+    tried_text = ", ".join(tried_symbols) if tried_symbols else requested_ticker
+
+    return (
+        f"❌ Kein Börsendatensatz für {requested_ticker} gefunden.\n\n"
+        f"Geprüfte Symbole: {tried_text}\n\n"
+        "Nutze die Symbolsuche:\n"
+        f"/suche {requested_ticker}\n\n"
+        "Oder teste direkt:\n"
+        "/analyse AAPL\n"
+        "/analyse NVDA\n"
+        "/analyse MSFT\n\n"
+        "Hinweis: Manche Aktien werden je nach Datenpaket oder Börse unter anderen Kürzeln geführt."
+    )
+
+
+def render_compact_analysis(data):
+    company = data["company"]
+    research = data["research"]
+    news = data["news_sentiment"]
+
+    used_symbol_note = ""
+    if data["used_symbol"] != data["requested_ticker"]:
+        used_symbol_note = f"Symbol: {data['used_symbol']}\n"
+
+    top_reasons = ""
+    for note in research["notes"][:3]:
+        top_reasons += f"- {note}\n"
+
+    return (
+        f"📈 {data['requested_ticker']} Kurz-Analyse\n\n"
+        f"{used_symbol_note}"
+        f"Unternehmen: {company['company_name']}\n"
+        f"Branche: {company['sector']}\n\n"
+        f"Signal: {research['signal']}\n"
+        f"Score: {research['score']} / 100\n"
+        f"Datenqualität: {research['data_quality']}\n"
+        f"News: {news['sentiment']} ({news['score']})\n\n"
+        f"Kurs: {format_number(data['price'])} USD\n"
+        f"Änderung: {format_percent(data['change_percent'])}\n\n"
+        f"Top-Gründe:\n"
+        f"{top_reasons}\n"
+        f"Für Details:\n"
+        f"/details {data['requested_ticker']}\n\n"
+        "Hinweis: Keine Anlageberatung."
+    )
+
+
+def render_detailed_analysis(data):
+    company = data["company"]
+    research = data["research"]
+    news = data["news_sentiment"]
+
+    used_symbol_note = ""
+    if data["used_symbol"] != data["requested_ticker"]:
+        used_symbol_note = f"Verwendetes FMP-Symbol: {data['used_symbol']}\n\n"
+
+    notes_text = ""
+    for note in research["notes"][:7]:
+        notes_text += f"- {note}\n"
+
+    headline_text = ""
+    if news["headlines"]:
+        for headline in news["headlines"]:
+            headline_text += f"- {headline}\n"
+    else:
+        headline_text = "- Keine aktuellen Headlines verfügbar\n"
+
+    factor_text = (
+        f"Bewertung: {research['factor_scores']['valuation']}\n"
+        f"Profitabilität: {research['factor_scores']['profitability']}\n"
+        f"Wachstum: {research['factor_scores']['growth']}\n"
+        f"Verschuldung: {research['factor_scores']['leverage']}\n"
+        f"Momentum: {research['factor_scores']['momentum']}\n"
+        f"News: {research['factor_scores']['news']}\n"
+    )
+
+    return (
+        f"📊 Detailanalyse für {data['requested_ticker']}\n\n"
+        f"{used_symbol_note}"
+        f"Unternehmen: {company['company_name']}\n"
+        f"Branche: {company['sector']}\n"
+        f"Industrie: {company['industry']}\n"
+        f"Land: {company['country']}\n"
+        f"Marktkapitalisierung: {format_market_cap(company['market_cap'])}\n\n"
+        f"📊 Fundamentaldaten\n"
+        f"KGV: {format_number(data['pe_ratio'])}\n"
+        f"ROE: {format_percent(data['roe'])}\n"
+        f"Debt/Equity: {format_number(data['debt_to_equity'])}\n"
+        f"Umsatzwachstum: {format_percent(data['revenue_growth'])}\n"
+        f"Gewinnwachstum: {format_percent(data['net_income_growth'])}\n"
+        f"Free-Cashflow-Wachstum: {format_percent(data['free_cash_flow_growth'])}\n"
+        f"EPS-Wachstum: {format_percent(data['eps_growth'])}\n\n"
+        f"💵 Marktdaten\n"
+        f"Kurs: {format_number(data['price'])} USD\n"
+        f"Änderung: {format_number(data['change'])}\n"
+        f"Änderung %: {format_percent(data['change_percent'])}\n"
+        f"Volumen: {data['volume']}\n\n"
+        f"🗞 News-Sentiment\n"
+        f"News-Score: {news['score']}\n"
+        f"Sentiment: {news['sentiment']}\n"
+        f"Aktuelle Headlines:\n"
+        f"{headline_text}\n"
+        f"🧠 Professioneller Research-Score\n"
+        f"Sektorprofil: {research['sector_profile']}\n"
+        f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
+        f"Score: {research['score']} / 100\n"
+        f"Signal: {research['signal']}\n\n"
+        f"Teilbewertungen:\n"
+        f"{factor_text}\n"
+        f"Gründe:\n"
+        f"{notes_text}\n"
+        "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
+    )
+
+
+async def send_text(update, text):
+    max_length = 3900
+
+    if len(text) <= max_length:
+        await update.message.reply_text(text)
+        return
+
+    parts = []
+    current = ""
+
+    for line in text.split("\n"):
+        if len(current) + len(line) + 1 > max_length:
+            parts.append(current)
+            current = line
+        else:
+            current += "\n" + line if current else line
+
+    if current:
+        parts.append(current)
+
+    for part in parts:
+        await update.message.reply_text(part)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "✅ Bot läuft erfolgreich auf Render!\n\n"
@@ -904,12 +1078,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📈 Verfügbare Befehle:\n\n"
         "/start - Bot starten\n"
-        "/analyse AAPL - Apple analysieren\n"
-        "/analyse NVDA - Nvidia analysieren\n"
-        "/analyse MSFT - Microsoft analysieren\n"
-        "/analyse SAP - SAP analysieren\n"
-        "/analyse SAP.DE - SAP Xetra testen\n"
-        "/analyse SAPGY - SAP ADR testen\n"
+        "/analyse AAPL - kompakte Analyse\n"
+        "/details AAPL - vollständige Detailanalyse\n"
+        "/analyse NVDA - kompakte Analyse\n"
+        "/details NVDA - vollständige Detailanalyse\n"
         "/suche SAP - Symbolsuche starten\n"
         "/info - Informationen zum Bot\n"
         "/help - Hilfe anzeigen"
@@ -919,14 +1091,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📊 Telegram Market Signal Bot\n\n"
-        "Aktuell in Entwicklung.\n\n"
-        "Der Bot kann bereits:\n"
-        "✅ echte Kursdaten abrufen\n"
-        "✅ Kursänderung anzeigen\n"
-        "✅ Volumen anzeigen\n"
-        "✅ Unternehmensdaten anzeigen\n"
-        "✅ KGV, ROE, Debt/Equity und Wachstum anzeigen\n"
-        "✅ News-Sentiment auswerten\n"
+        "Der Bot kann aktuell:\n"
+        "✅ kompakte Analyse mit /analyse liefern\n"
+        "✅ ausführliche Detailanalyse mit /details liefern\n"
+        "✅ Kursdaten, Fundamentaldaten und News-Sentiment auswerten\n"
         "✅ branchenspezifischen Research-Score berechnen\n"
         "✅ Ticker-Fallbacks und Symbolsuche nutzen\n\n"
         "Nächster Ausbau:\n"
@@ -988,126 +1156,30 @@ async def analyse(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     requested_ticker = context.args[0].upper().strip()
+    data = build_analysis(requested_ticker)
 
-    used_symbol, stock, tried_symbols = find_best_symbol(requested_ticker)
+    if not data["found"]:
+        await send_text(update, render_not_found(data))
+        return
 
-    if not stock:
-        tried_text = ", ".join(tried_symbols) if tried_symbols else requested_ticker
+    await send_text(update, render_compact_analysis(data))
 
+
+async def details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
         await update.message.reply_text(
-            f"❌ Kein Börsendatensatz für {requested_ticker} gefunden.\n\n"
-            f"Geprüfte Symbole: {tried_text}\n\n"
-            "Nutze die Symbolsuche:\n"
-            f"/suche {requested_ticker}\n\n"
-            "Oder teste direkt:\n"
-            "/analyse AAPL\n"
-            "/analyse NVDA\n"
-            "/analyse MSFT\n"
-            "/analyse SAP.DE\n"
-            "/analyse SAPGY\n\n"
-            "Hinweis: Manche Aktien werden bei FMP je nach Datenpaket oder Börse unter anderen Kürzeln geführt."
+            "Bitte nutze:\n/details AAPL"
         )
         return
 
-    profile = get_company_profile(used_symbol)
-    metrics = get_key_metrics(used_symbol)
-    ratios = get_ratios(used_symbol)
-    growth = get_financial_growth(used_symbol)
-    news_items = get_stock_news(used_symbol)
-    news_sentiment = analyze_news_sentiment(news_items)
+    requested_ticker = context.args[0].upper().strip()
+    data = build_analysis(requested_ticker)
 
-    company = extract_company_data(profile, metrics)
-    growth_data = extract_growth_data(growth)
+    if not data["found"]:
+        await send_text(update, render_not_found(data))
+        return
 
-    price = stock.get("price", "Unbekannt")
-    change = stock.get("change", "Unbekannt")
-    change_percent = first_available(
-        stock.get("changePercentage"),
-        stock.get("changesPercentage"),
-    )
-    volume = stock.get("volume", "Unbekannt")
-
-    pe_ratio = calculate_pe_ratio(stock, metrics, ratios)
-    roe = calculate_roe(metrics, ratios)
-    debt_to_equity = calculate_debt_to_equity(ratios, metrics)
-
-    revenue_growth = growth_data["revenue_growth"]
-    net_income_growth = growth_data["net_income_growth"]
-    free_cash_flow_growth = growth_data["free_cash_flow_growth"]
-    eps_growth = growth_data["eps_growth"]
-
-    research = calculate_professional_research_score(
-        company=company,
-        change_percent=change_percent,
-        pe_ratio=pe_ratio,
-        roe=roe,
-        revenue_growth=revenue_growth,
-        net_income_growth=net_income_growth,
-        debt_to_equity=debt_to_equity,
-        news_score=news_sentiment["score"],
-    )
-
-    used_symbol_note = ""
-    if used_symbol != requested_ticker:
-        used_symbol_note = f"Verwendetes FMP-Symbol: {used_symbol}\n\n"
-
-    notes_text = ""
-    for note in research["notes"][:7]:
-        notes_text += f"- {note}\n"
-
-    headline_text = ""
-    if news_sentiment["headlines"]:
-        for headline in news_sentiment["headlines"]:
-            headline_text += f"- {headline}\n"
-    else:
-        headline_text = "- Keine aktuellen Headlines verfügbar\n"
-
-    factor_text = (
-        f"Bewertung: {research['factor_scores']['valuation']}\n"
-        f"Profitabilität: {research['factor_scores']['profitability']}\n"
-        f"Wachstum: {research['factor_scores']['growth']}\n"
-        f"Verschuldung: {research['factor_scores']['leverage']}\n"
-        f"Momentum: {research['factor_scores']['momentum']}\n"
-        f"News: {research['factor_scores']['news']}\n"
-    )
-
-    await update.message.reply_text(
-        f"📈 Analyse für {requested_ticker}\n\n"
-        f"{used_symbol_note}"
-        f"Unternehmen: {company['company_name']}\n"
-        f"Branche: {company['sector']}\n"
-        f"Industrie: {company['industry']}\n"
-        f"Land: {company['country']}\n"
-        f"Marktkapitalisierung: {format_market_cap(company['market_cap'])}\n\n"
-        f"📊 Fundamentaldaten\n"
-        f"KGV: {format_number(pe_ratio)}\n"
-        f"ROE: {format_percent(roe)}\n"
-        f"Debt/Equity: {format_number(debt_to_equity)}\n"
-        f"Umsatzwachstum: {format_percent(revenue_growth)}\n"
-        f"Gewinnwachstum: {format_percent(net_income_growth)}\n"
-        f"Free-Cashflow-Wachstum: {format_percent(free_cash_flow_growth)}\n"
-        f"EPS-Wachstum: {format_percent(eps_growth)}\n\n"
-        f"💵 Marktdaten\n"
-        f"Kurs: {format_number(price)} USD\n"
-        f"Änderung: {format_number(change)}\n"
-        f"Änderung %: {format_percent(change_percent)}\n"
-        f"Volumen: {volume}\n\n"
-        f"🗞 News-Sentiment\n"
-        f"News-Score: {news_sentiment['score']}\n"
-        f"Sentiment: {news_sentiment['sentiment']}\n"
-        f"Aktuelle Headlines:\n"
-        f"{headline_text}\n"
-        f"🧠 Professioneller Research-Score\n"
-        f"Sektorprofil: {research['sector_profile']}\n"
-        f"Datenqualität: {research['data_quality']} ({research['available_factors']} Faktoren)\n"
-        f"Score: {research['score']} / 100\n"
-        f"Signal: {research['signal']}\n\n"
-        f"Teilbewertungen:\n"
-        f"{factor_text}\n"
-        f"Gründe:\n"
-        f"{notes_text}\n"
-        "Hinweis: Keine Anlageberatung. Dieses Signal ist nur ein automatisierter Research-Hinweis."
-    )
+    await send_text(update, render_detailed_analysis(data))
 
 
 def main():
@@ -1126,6 +1198,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analyse", analyse))
+    app.add_handler(CommandHandler("details", details))
     app.add_handler(CommandHandler("suche", suche))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
